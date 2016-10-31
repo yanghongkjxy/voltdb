@@ -379,6 +379,14 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
     @Override
     public void deliver(VoltMessage message)
     {
+        if (tmLog.isDebugEnabled()) {
+            String invocationStr = String.format("[SpScheduler:deliver] is leader: %s,"
+                    + "current truncation handle: %s, max SpHandle %s, message %s",
+                    m_isLeader, TxnEgo.txnIdToString(m_repairLogTruncationHandle),
+                    TxnEgo.txnIdToString(m_maxScheduledTxnSpHandle), message.toString());
+            tmLog.debug(invocationStr);
+        }
+
         if (message instanceof Iv2InitiateTaskMessage) {
             handleIv2InitiateTaskMessage((Iv2InitiateTaskMessage)message);
         }

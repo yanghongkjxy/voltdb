@@ -81,7 +81,7 @@
     </logger>
 
     <logger name="TM">
-        <level value="DEBUG"/>
+        <level value="INFO"/>
     </logger>
 
     <logger name="REJOIN">

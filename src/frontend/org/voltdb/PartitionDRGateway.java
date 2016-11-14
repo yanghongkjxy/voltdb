@@ -149,7 +149,7 @@ public class PartitionDRGateway implements DurableUniqueIdListener {
     }
 
     @Override
-    public void lastUniqueIdsMadeDurable(long spUniqueId, long mpUniqueId) {}
+    public void lastUniqueIdsMadeDurable(long firstSpUniqueId, long lastSpUniqueId, long firstMpUniqueId, long lastMpUniqueId) {}
 
     public int processDRConflict(int partitionId, int remoteClusterId, long remoteTimestamp, String tableName, DRRecordType action,
                                  DRConflictType deleteConflict, ByteBuffer existingMetaTableForDelete, ByteBuffer existingTupleTableForDelete,

@@ -130,7 +130,7 @@ public class SpScheduler extends Scheduler implements SnapshotCompletionInterest
         /**
          * Notify listener of last durable Single-Part and Multi-Part uniqueIds
          */
-        public void lastUniqueIdsMadeDurable(long spUniqueId, long mpUniqueId);
+        public void lastUniqueIdsMadeDurable(long prevSpUniqueId, long lastSpUniqueId, long prevMpUniqueId, long lastMpUniqueId);
     }
 
     List<Long> m_replicaHSIds = new ArrayList<Long>();

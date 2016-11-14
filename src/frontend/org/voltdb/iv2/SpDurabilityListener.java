@@ -59,13 +59,17 @@ public class SpDurabilityListener implements DurabilityListener {
     }
 
     class AsyncCompletionChecks implements CommandLog.CompletionChecks {
+        protected long m_prevSpUniqueId;
+        protected long m_prevMpUniqueId;
         protected long m_lastSpUniqueId;
         protected long m_lastMpUniqueId;
         protected boolean m_changed = false;
 
-        AsyncCompletionChecks(long lastSpUniqueId, long lastMpUniqueId) {
-            m_lastSpUniqueId = lastSpUniqueId;
-            m_lastMpUniqueId = lastMpUniqueId;
+        AsyncCompletionChecks(long prevSpUniqueId, long prevMpUniqueId) {
+            m_prevSpUniqueId = prevSpUniqueId;
+            m_prevMpUniqueId = prevMpUniqueId;
+            m_lastSpUniqueId = prevSpUniqueId;
+            m_lastMpUniqueId = prevMpUniqueId;
         }
 
         @Override
@@ -81,11 +85,11 @@ public class SpDurabilityListener implements DurabilityListener {
         @Override
         public void setLastDurableUniqueId(long uniqueId) {
             if (UniqueIdGenerator.getPartitionIdFromUniqueId(uniqueId) == MpInitiator.MP_INIT_PID) {
-                assert m_lastMpUniqueId <= uniqueId;
+                assert m_lastMpUniqueId < uniqueId;
                 m_lastMpUniqueId = uniqueId;
             }
             else {
-                assert m_lastSpUniqueId <= uniqueId;
+                assert m_lastSpUniqueId < uniqueId;
                 m_lastSpUniqueId = uniqueId;
             }
             m_changed = true;
@@ -110,7 +114,7 @@ public class SpDurabilityListener implements DurabilityListener {
                 }
                 // Notify the SP UniqueId listeners
                 for (DurableUniqueIdListener listener : m_uniqueIdListeners) {
-                    listener.lastUniqueIdsMadeDurable(m_lastSpUniqueId, m_lastMpUniqueId);
+                    listener.lastUniqueIdsMadeDurable(m_prevSpUniqueId, m_lastSpUniqueId, m_prevMpUniqueId, m_lastMpUniqueId);
                 }
             }
         }
@@ -176,7 +180,7 @@ public class SpDurabilityListener implements DurabilityListener {
         m_uniqueIdListeners.add(listener);
         if (m_currentCompletionChecks != null && !m_commandLoggingEnabled) {
             // Since command logging is disabled set the durable uniqueId to maxLong
-            listener.lastUniqueIdsMadeDurable(Long.MAX_VALUE, Long.MAX_VALUE);
+            listener.lastUniqueIdsMadeDurable(Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
         }
     }
 
@@ -209,7 +213,7 @@ public class SpDurabilityListener implements DurabilityListener {
             m_currentCompletionChecks = new NoCompletionChecks();
             // Since command logging is disabled set the durable uniqueId to maxLong
             for (DurableUniqueIdListener listener : m_uniqueIdListeners) {
-                listener.lastUniqueIdsMadeDurable(Long.MAX_VALUE, Long.MAX_VALUE);
+                listener.lastUniqueIdsMadeDurable(Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE);
             }
         }
         else

@@ -180,7 +180,6 @@ public class AsyncBenchmark {
         ClientConfig clientConfig = new ClientConfig(config.user, config.password, new StatusListener(), config.ssl);
         clientConfig.setMaxTransactionsPerSecond(config.ratelimit);
 
-<<<<<<< HEAD
         if (config.ssl != null && !config.ssl.isEmpty()) {
             try {
                 clientConfig.enableSSL();
@@ -188,10 +187,9 @@ public class AsyncBenchmark {
                 System.err.println("Failed to configure ssl, exiting");
                 System.exit(-1);
             }
-=======
+        }
         if (config.topologyaware) {
             clientConfig.setTopologyChangeAware(true);
->>>>>>> master
         }
 
         client = ClientFactory.createClient(clientConfig);

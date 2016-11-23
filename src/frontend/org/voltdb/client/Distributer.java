@@ -53,6 +53,8 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 import javax.security.auth.Subject;
 
+import jsr166y.ThreadLocalRandom;
+
 import org.cliffc_voltpatches.high_scale_lib.NonBlockingHashMap;
 import org.json_voltpatches.JSONException;
 import org.json_voltpatches.JSONObject;
@@ -63,6 +65,7 @@ import org.voltcore.network.VoltNetworkPool.IOStatsIntf;
 import org.voltcore.network.VoltProtocolHandler;
 import org.voltcore.utils.CoreUtils;
 import org.voltcore.utils.Pair;
+import org.voltcore.utils.ssl.SSLEncryptionService;
 import org.voltdb.ClientResponseImpl;
 import org.voltdb.VoltTable;
 import org.voltdb.client.ClientStatusListenerExt.DisconnectCause;
@@ -73,8 +76,6 @@ import com.google_voltpatches.common.base.Throwables;
 import com.google_voltpatches.common.collect.ImmutableList;
 import com.google_voltpatches.common.collect.ImmutableSet;
 import com.google_voltpatches.common.collect.Maps;
-
-import jsr166y.ThreadLocalRandom;
 
 /**
  *   De/multiplexes transactions across a cluster
@@ -178,6 +179,9 @@ class Distributer {
      * JAAS Authentication Subject
      */
     private final Subject m_subject;
+
+    // executor service for ssl encryption/decryption, if ssl is enabled.
+    private SSLEncryptionService m_sslEncryptionService;
 
     /**
      * Handles topology updates for client affinity
@@ -950,9 +954,11 @@ class Distributer {
     throws UnknownHostException, IOException
     {
         SSLEngine sslEngine = null;
+
         if (sslContext != null) {
             sslEngine = sslContext.createSSLEngine("client", port);
             sslEngine.setUseClientMode(true);
+            m_sslEncryptionService = SSLEncryptionService.initialize(CoreUtils.availableProcessors());
         }
 
         final Object socketChannelAndInstanceIdAndBuildString[] =
@@ -1229,7 +1235,10 @@ class Distributer {
         m_timeoutReaperHandle.cancel(false);
         m_ex.shutdown();
         m_ex.awaitTermination(365, TimeUnit.DAYS);
-
+        if (m_sslEncryptionService != null) {
+            m_sslEncryptionService.shutdown();
+            m_sslEncryptionService.awaitTermination(365, TimeUnit.DAYS);
+        }
         m_network.shutdown();
     }
 

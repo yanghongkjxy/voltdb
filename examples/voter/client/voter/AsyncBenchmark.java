@@ -188,6 +188,7 @@ public class AsyncBenchmark {
                 System.exit(-1);
             }
         }
+
         if (config.topologyaware) {
             clientConfig.setTopologyChangeAware(true);
         }

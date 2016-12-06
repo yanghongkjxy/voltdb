@@ -62,4 +62,5 @@ public interface ProducerDRGateway {
     public void activateDRProducer();
 
     public void blockOnSyncSnapshotGeneration();
+    public boolean setDRProtocolVersion(int drVersion);
 }

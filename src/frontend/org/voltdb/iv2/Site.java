@@ -1597,6 +1597,17 @@ public class Site implements Runnable, SiteProcedureConnection, SiteSnapshotConn
         hostLog.info("DR protocol version has been set to " + drVersion);
     }
 
+    @Override
+    public void setDRProtocolVersion(int drVersion, long spHandle, long uniqueId) {
+        //TODO: remove------------------------------
+        hostLog.info("new setDRProtocolVersion");
+        setDRProtocolVersion(drVersion);
+        //TODO: remove------------------------------
+        hostLog.info("Calling generate event with uniqueId: " + UniqueIdGenerator.toShortString(uniqueId));
+        generateDREvent(
+                EventType.DR_STREAM_START, uniqueId, m_lastCommittedSpHandle, spHandle, new byte[0]);
+    }
+
     /**
      * Generate a in-stream DR event which pushes an event buffer to topend
      */

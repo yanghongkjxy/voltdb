@@ -32,6 +32,7 @@ import org.voltdb.SystemProcedureExecutionContext;
 import org.voltdb.TupleStreamStateInfo;
 import org.voltdb.VoltSystemProcedure;
 import org.voltdb.VoltTable;
+import org.voltdb.VoltTable.ColumnInfo;
 import org.voltdb.VoltType;
 import org.voltdb.dtxn.DtxnConstants;
 import org.voltdb.jni.ExecutionEngine.TaskType;
@@ -101,12 +102,20 @@ public class ExecuteTask extends VoltSystemProcedure {
                 result = new VoltTable(STATUS_SCHEMA);
                 result.addRow(STATUS_OK);
                 int drVersion = buffer.getInt();
-                context.getSiteProcedureConnection().setDRProtocolVersion(drVersion);
+                //TODO: MULTICLUSTER version is defined in pro. How do we avoid hard-coding here?
+                if (drVersion >= 7) {
+                    long uniqueId = m_runner.getUniqueId();
+                    long spHandle = m_runner.getTxnState().getNotice().getSpHandle();
+                    context.getSiteProcedureConnection().setDRProtocolVersion(drVersion, spHandle, uniqueId);
+                } else {
+                    context.getSiteProcedureConnection().setDRProtocolVersion(drVersion);
+                }
                 break;
             }
             case SET_DRID_TRACKER:
             {
-                result = new VoltTable(STATUS_SCHEMA);
+                result = new VoltTable(STATUS_SCHEMA,
+                        new ColumnInfo("LOCAL_UNIQUEID", VoltType.BIGINT));
                 try {
                     byte[] paramBuf = new byte[buffer.remaining()];
                     buffer.get(paramBuf);
@@ -122,7 +131,7 @@ public class ExecuteTask extends VoltSystemProcedure {
                             context.appendApplyBinaryLogTxns(producerClusterId, producerPartitionId, -1L, tracker);
                         }
                     }
-                    result.addRow(STATUS_OK);
+                    result.addRow(STATUS_OK, m_runner.getTxnState().uniqueId);
 
                 } catch (Exception e) {
                     e.printStackTrace();

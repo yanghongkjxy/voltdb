@@ -19,8 +19,6 @@ package org.voltdb;
 
 import java.util.List;
 
-import com.google_voltpatches.common.net.HostAndPort;
-
 // Interface through which the outside world can interact with the consumer side
 // of DR. Currently, there's not much to do here, since the subsystem is
 // largely self-contained
@@ -38,6 +36,6 @@ public interface ConsumerDRGateway extends Promotable {
 
     DRConsumerMpCoordinator getDRConsumerMpCoordinator();
 
-    void createConsumerDispatcher(byte producerClusterId, List<HostAndPort> producerHosts);
+    void createConsumerDispatcher(byte producerClusterId, List<String> clusterNodeInfo);
 
 }

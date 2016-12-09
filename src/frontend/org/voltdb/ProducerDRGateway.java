@@ -17,7 +17,10 @@
 
 package org.voltdb;
 
+import java.util.List;
 import java.util.Map;
+
+import org.voltdb.pmsg.DRAgent.ClusterInfo;
 
 public interface ProducerDRGateway {
 
@@ -63,4 +66,5 @@ public interface ProducerDRGateway {
 
     public void blockOnSyncSnapshotGeneration();
     public boolean setDRProtocolVersion(int drVersion);
+    public void startCursors(List<ClusterInfo> requestedCursors);
 }

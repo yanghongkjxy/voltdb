@@ -3564,7 +3564,6 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback, HostM
 
     private void prepareReplication() {
         try {
-            System.out.println("In prepareReplication, consumerDRGateway=" + m_consumerDRGateway);
             if (m_consumerDRGateway != null) {
                 m_consumerDRGateway.initialize(m_config.m_startAction != StartAction.CREATE);
             }

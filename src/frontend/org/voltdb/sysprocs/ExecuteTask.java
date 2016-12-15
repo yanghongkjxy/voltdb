@@ -102,8 +102,8 @@ public class ExecuteTask extends VoltSystemProcedure {
                 result = new VoltTable(STATUS_SCHEMA);
                 result.addRow(STATUS_OK);
                 int drVersion = buffer.getInt();
-                //TODO: MULTICLUSTER version is defined in pro. How do we avoid hard-coding here?
-                if (drVersion >= 7) {
+                int createStartStream = buffer.getInt();
+                if (createStartStream > 0) {
                     long uniqueId = m_runner.getUniqueId();
                     long spHandle = m_runner.getTxnState().getNotice().getSpHandle();
                     context.getSiteProcedureConnection().setDRProtocolVersion(drVersion, spHandle, uniqueId);

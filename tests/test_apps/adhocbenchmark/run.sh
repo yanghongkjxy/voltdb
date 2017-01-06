@@ -50,25 +50,30 @@ function srccompile() {
     mkdir -p obj
     local srcfiles=`find src -name '*.java'`
     javac -classpath $CLASSPATH -d obj $srcfiles
+    jar cf ${APPNAME}.jar -C obj $APPNAME
     # stop if compilation fails
     if [ $? != 0 ]; then exit; fi
 }
 
-# build an application catalog
-function catalog() {
+function jars() {
     $GENERATE || exit
     srccompile
-    $VOLTDB compile --classpath obj -o $APPNAME.jar -p project.xml
     # stop if compilation fails
     if [ $? != 0 ]; then exit; fi
 }
 
 # run the voltdb server locally
 function server() {
-    # if a catalog doesn't exist, build one
-    if [ ! -f $APPNAME.jar ]; then catalog; fi
+    # if a application doesn't exist, build one
+    if [ ! -f $APPNAME.jar ]; then jars; fi
     # run the server
-    $VOLTDB create -d deployment.xml -l $LICENSE -H localhost $APPNAME.jar
+    $VOLTDB init -C deployment.xml --force
+
+    $VOLTDB start -l $LICENSE -H localhost
+}
+
+function init() {
+    sqlcmd < ddl.sql
 }
 
 # run the client that drives the example
@@ -150,7 +155,7 @@ function benchmark() {
 }
 
 function help() {
-    echo "Usage: ./run.sh {clean|catalog|server|benchmark|benchmark-joins|benchmark-projections|benchmark-help}"
+    echo "Usage: ./run.sh {clean|jars|server|init|benchmark|benchmark-joins|benchmark-projections|benchmark-help}"
 }
 
 # Run the target passed as the first arg on the command line

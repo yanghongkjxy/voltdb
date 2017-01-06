@@ -31,9 +31,11 @@ project_path = os.path.join(root_dir, 'project.xml')
 ddl_path = os.path.join(root_dir, 'ddl.sql')
 
 ddl_start = '-- DDL generated for ad hoc benchmark - this will be overwritten'
-ddl_end = None
+ddl_start_file = 'file -inlinebatch END_OF_BATCH'
+ddl_end = 'END_OF_BATCH'
 ddl_pk = 'CONSTRAINT PK_%s PRIMARY KEY (%s)'
 ddl_partition = '-- PARTITION BY ( %s )'
+ddl_table_partition = 'PARTITION TABLE %s ON COLUMN %s;'
 table_start = '\nCREATE TABLE %s\n('
 table_end = ');'
 project_start = '''\
@@ -175,6 +177,7 @@ def generate_table_ddl_lines(table, name):
 
 def generate_ddl(tables):
     yield ddl_start
+    yield ddl_start_file
     for table in tables:
         for variation in range(table.nvariations):
             name = '%s_%d' % (table.name, variation + 1)
@@ -182,7 +185,10 @@ def generate_ddl(tables):
             generator = generate_table_ddl_lines(table, name)
             for line in generate_comma_separated_list(generator, '  ', '--'):
                 yield line
+
             yield table_end
+            if table.partcol is not None:
+                yield ddl_table_partition % (name, table.columns[table.partcol].name);
     yield ddl_end
 
 def generate_file(path, generator):

@@ -1,3 +1,5 @@
+file -inlinebatch END_OF_BATCH
+
 CREATE TABLE WAREHOUSE (
   W_ID SMALLINT DEFAULT '0' NOT NULL,
   W_NAME VARCHAR(16) DEFAULT NULL,
@@ -148,3 +150,35 @@ CREATE TABLE RUN_PERMIT(
 PERMIT INTEGER DEFAULT NULL,
   PRIMARY KEY (PERMIT));
 
+partition table WAREHOUSE on column W_ID;
+partition table DISTRICT on column D_W_ID;
+partition table CUSTOMER on column C_W_ID;
+partition table HISTORY on column H_W_ID;
+partition table STOCK on column S_W_ID;
+partition table ORDERS on column O_W_ID;
+partition table NEW_ORDER on column NO_W_ID;
+partition table ORDER_LINE on column OL_W_ID;
+
+END_OF_BATCH
+
+LOAD CLASSES tpcc.jar;
+
+file -inlinebatch END_OF_BATCH2
+
+CREATE PROCEDURE FROM CLASS com.procedures.LoadWarehouse;
+CREATE PROCEDURE FROM CLASS com.procedures.LoadWarehouseReplicated;
+CREATE PROCEDURE FROM CLASS com.procedures.ostatByCustomerName;
+CREATE PROCEDURE FROM CLASS com.procedures.ostatByCustomerId;
+CREATE PROCEDURE FROM CLASS com.procedures.delivery;
+CREATE PROCEDURE FROM CLASS com.procedures.paymentByCustomerName;
+CREATE PROCEDURE FROM CLASS com.procedures.paymentByCustomerNameC;
+CREATE PROCEDURE FROM CLASS com.procedures.paymentByCustomerNameW;
+CREATE PROCEDURE FROM CLASS com.procedures.paymentByCustomerId;
+CREATE PROCEDURE FROM CLASS com.procedures.paymentByCustomerIdC;
+CREATE PROCEDURE FROM CLASS com.procedures.paymentByCustomerIdW;
+CREATE PROCEDURE FROM CLASS com.procedures.neworder;
+CREATE PROCEDURE FROM CLASS com.procedures.slev;
+CREATE PROCEDURE FROM CLASS com.procedures.ResetWarehouse;
+CREATE PROCEDURE FROM CLASS com.procedures.LoadStatus;
+
+END_OF_BATCH2

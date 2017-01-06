@@ -45,30 +45,34 @@ function srccompile() {
     javac -classpath $CLASSPATH -d obj \
         src/com/*.java \
         src/com/procedures/*.java
+
+    jar cf ${APPNAME}.jar -C obj com
     # stop if compilation fails
     if [ $? != 0 ]; then exit; fi
 }
 
-# build an application catalog
-function catalog() {
+function jars() {
     srccompile
-    $VOLTDB compile --classpath obj -o $APPNAME.jar -p project.xml
-    # stop if compilation fails
-    if [ $? != 0 ]; then exit; fi
+
+}
+
+function init() {
+    sqlcmd < tpcc-ddl.sql
 }
 
 # run the voltdb server locally
 function server() {
     # if a catalog doesn't exist, build one
-    if [ ! -f $APPNAME.jar ]; then catalog; fi
+    if [ ! -f $APPNAME.jar ]; then jars; fi
     # run the server
-    $VOLTDB create -d deployment.xml -l $LICENSE -H $HOST $APPNAME.jar
+    $VOLTDB init -C deployment.xml --force
+    $VOLTDB start -l $LICENSE -H $HOST
 }
 
 # run the client that drives the example
 function client() {
     srccompile
-    java -classpath obj:$CLASSPATH:obj com.MyTPCC \
+    java -classpath obj:$CLASSPATH:$APPNAME.jar com.MyTPCC \
         --servers=localhost \
         --duration=180 \
         --warehouses=256 \
@@ -76,7 +80,7 @@ function client() {
 }
 
 function help() {
-    echo "Usage: ./run.sh {clean|catalog|server|client}"
+    echo "Usage: ./run.sh {clean|jars|init|server|client}"
 }
 
 # Run the target passed as the first arg on the command line

@@ -48,7 +48,7 @@ public class SSLBufferEncrypter {
             }
             switch (result.getStatus()) {
                 case OK:
-                    // in m_dstBuffer, newly decrtyped data is between pos and lim
+                    // in m_dstBuffer, newly decrypted data is between pos and limit
                     if (result.bytesProduced() > 0) {
                         dstBuffer.limit(dstBuffer.position() + result.bytesProduced());
                         return;

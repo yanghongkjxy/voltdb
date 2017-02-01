@@ -53,7 +53,7 @@ public class TLSNIOWriteStream extends NIOWriteStream {
     private final CipherExecutor m_ce;
     private final SSLEngine m_sslEngine;
     private final SSLBufferEncrypter m_encrypter;
-    private final EncryptionGateway m_ecryptgw = new EncryptionGateway();
+    private final EncryptionGateway m_encryptgw = new EncryptionGateway();
     private int m_ledger = 0;
 
     public TLSNIOWriteStream(VoltPort port, Runnable offBackPressureCallback,
@@ -74,6 +74,9 @@ public class TLSNIOWriteStream extends NIOWriteStream {
         return m_sslEngine.getSession().getPacketBufferSize();
     }
 
+    ConcurrentLinkedDeque<EncryptFrame> getEncryptedFrames() {
+        return m_encrypted;
+    }
     @Override
     int serializeQueuedWrites(NetworkDBBPool pool) throws IOException {
         checkForGatewayExceptions();
@@ -97,7 +100,7 @@ public class TLSNIOWriteStream extends NIOWriteStream {
                 // partial parts of one message. a message may not contain whole
                 // messages and an incomplete partial fragment of one
                 if (accum.writerIndex() > 0) {
-                    m_ecryptgw.offer(new EncryptFrame(accum, frameMsgs));
+                    m_encryptgw.offer(new EncryptFrame(accum, frameMsgs));
                     frameMsgs = 0;
                     bytesQueued += accum.writerIndex();
                     accum = m_ce.allocator().buffer(frameMax).clear();
@@ -107,11 +110,11 @@ public class TLSNIOWriteStream extends NIOWriteStream {
                 ds.serialize(jbb);
                 checkSloppySerialization(jbb, ds);
                 bytesQueued += big.writerIndex();
-                m_ecryptgw.offer(new EncryptFrame(big, 1));
+                m_encryptgw.offer(new EncryptFrame(big, 1));
                 frameMsgs = 0;
                 continue;
             } else if (accum.writerIndex() + serializedSize > frameMax) {
-                m_ecryptgw.offer(new EncryptFrame(accum, frameMsgs));
+                m_encryptgw.offer(new EncryptFrame(accum, frameMsgs));
                 frameMsgs = 0;
                 bytesQueued += accum.writerIndex();
                 accum = m_ce.allocator().buffer(frameMax).clear();
@@ -124,7 +127,7 @@ public class TLSNIOWriteStream extends NIOWriteStream {
             ++frameMsgs;
         }
         if (accum.writerIndex() > 0) {
-            m_ecryptgw.offer(new EncryptFrame(accum, frameMsgs));
+            m_encryptgw.offer(new EncryptFrame(accum, frameMsgs));
             bytesQueued += accum.writerIndex();
         } else {
             accum.release();
@@ -203,7 +206,7 @@ public class TLSNIOWriteStream extends NIOWriteStream {
     @Override
     synchronized public boolean isEmpty() {
         return m_queuedWrites.isEmpty()
-            && m_ecryptgw.isEmpty()
+            && m_encryptgw.isEmpty()
             && m_encrypted.isEmpty()
             && m_partialSize == 0
             && !m_outbuf.isReadable();
@@ -272,7 +275,7 @@ public class TLSNIOWriteStream extends NIOWriteStream {
                 .append("isEmpty()=").append(isEmpty())
                 .append(", encrypted.isEmpty()=").append(m_encrypted.isEmpty())
                 .append(", exceptions.isEmpty()=").append(m_exceptions.isEmpty())
-                .append(", gateway=").append(m_ecryptgw.dumpState())
+                .append(", gateway=").append(m_encryptgw.dumpState())
                 .append(", inFligth=").append(m_inFlight.availablePermits())
                 .append(", outbuf.readableBytes()=").append(m_outbuf.readableBytes())
                 .append("]").toString();
@@ -307,7 +310,7 @@ public class TLSNIOWriteStream extends NIOWriteStream {
                 }
             }
 
-            m_ecryptgw.die();
+            m_encryptgw.die();
 
             EncryptFrame frame = null;
             while ((frame = m_encrypted.poll()) != null) {

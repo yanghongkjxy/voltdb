@@ -239,7 +239,7 @@ public class TestTLSNIOWriteStream extends JUnit4LocalClusterTest {
     }
 
     //@Test
-    public void ntestSink() throws Exception {
+    public void testSink() throws Exception {
         setUp();
         MockChannel channel = new MockChannel(MockChannel.SINK, 0);
         MockTLSPort port = new MockTLSPort(m_sslEngine, m_ce, m_pool);

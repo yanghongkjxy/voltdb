@@ -61,6 +61,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.voltcore.utils.EstTime;
 import org.voltcore.utils.EstTimeUpdater;
+
 import org.voltdb.AdmissionControlGroup;
 
 import junit.framework.TestCase;
@@ -111,7 +112,7 @@ public class TestNIOWriteStream extends TestCase {
      * Mock channel that will either consume all, some or no
      * bytes from the buffer.
      */
-    private static class MockChannel implements GatheringByteChannel {
+    static class MockChannel implements GatheringByteChannel {
         MockChannel(int behavior, int closeafter) {
             m_behavior = behavior;
             this.closeAfter = closeafter;

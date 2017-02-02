@@ -1,3 +1,53 @@
+/* This file is part of VoltDB.
+ * Copyright (C) 2008-2017 VoltDB Inc.
+ *
+ * This file contains original code and/or modifications of original code.
+ * Any modifications made by VoltDB Inc. are licensed under the following
+ * terms and conditions:
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+/* Copyright (C) 2008
+ * Evan Jones
+ * Massachusetts Institute of Technology
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+
 package org.voltcore.network;
 
 import static org.junit.Assert.assertTrue;
@@ -17,6 +67,7 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+import java.util.Deque;
 import java.util.Properties;
 
 import javax.net.ssl.SSLContext;
@@ -63,6 +114,12 @@ public class TestTLSNIOWriteStream extends JUnit4LocalClusterTest {
         @Override
         public void setInterests(int opsToAdd, int opsToRemove) {
             this.opsToAdd = opsToAdd;
+            //super.setInterests(opsToAdd, opsToRemove);
+        }
+
+        @Override
+        protected void enableWriteSelection() {
+            setInterests(SelectionKey.OP_WRITE, 0);
         }
 
         public boolean checkWriteSet() {
@@ -238,7 +295,7 @@ public class TestTLSNIOWriteStream extends JUnit4LocalClusterTest {
         };
     }
 
-    //@Test
+    @Test
     public void testSink() throws Exception {
         setUp();
         MockChannel channel = new MockChannel(MockChannel.SINK, 0);
@@ -265,15 +322,15 @@ public class TestTLSNIOWriteStream extends JUnit4LocalClusterTest {
         int processedWrites = wstream.serializeQueuedWrites(m_pool);
         System.out.println(processedWrites);
         wstream.waitForPendingEncrypts();
-        // TODO: get encrypted bytes, dain the channel and make sure encrypted bytes
+        // TODO: get encrypted bytes, drain the channel and make sure encrypted bytes
         // is same as # of encrypted bytes and bytes drained are same
-//        Deque<EncryptFrame>encrptyedFrames = wstream.getEncryptedFrames();
-//        System.out.println("number of frames: " + encrptyedFrames.size());
-//        System.out.println(wstream.drainTo(channel));
-//        assertTrue(wstream.isEmpty());
-//        assertEquals(0, wstream.getOutstandingMessageCount());
-//        wstream.shutdown();
-//        port.toString();
+        Deque<EncryptFrame>encrptyedFrames = wstream.getEncryptedFrames();
+        System.out.println("number of frames: " + encrptyedFrames.size());
+        System.out.println(wstream.drainTo(channel));
+        assertTrue(wstream.isEmpty());
+        assertTrue(wstream.getOutstandingMessageCount() == 0);
+        wstream.shutdown();
+        port.toString();
     }
 
 

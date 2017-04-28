@@ -659,7 +659,7 @@ inline void TableTuple::setNValue(const int idx, voltdb::NValue value) const
     } catch (SQLException &ex) {
         std::string errorMsg = ex.message()
                                 + ", column debug info: " + columnInfo->debug()
-								+ ", tuple schema debug info: " + m_schema->debug();
+                                + ", tuple schema debug info: " + m_schema->debug();
 
         throw SQLException(ex.getSqlState(), errorMsg);
     }
@@ -711,7 +711,7 @@ inline void TableTuple::setNValueAllocateForObjectCopies(const int idx,
     } catch (SQLException &ex) {
         std::string errorMsg = ex.message()
                 + ", column debug info:" + columnInfo->debug()
-				+ ", tuple schema debug info: " + m_schema->debug();
+                + ", tuple schema debug info: " + m_schema->debug();
 
         throw SQLException(ex.getSqlState(), errorMsg);
     }

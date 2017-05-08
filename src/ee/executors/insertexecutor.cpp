@@ -148,7 +148,7 @@ bool InsertExecutor::p_init(AbstractPlanNode* abstractNode,
     return true;
 }
 
-void InsertExecutor::executePurgeFragmentIfNeeded(PersistentTable** ptrToTable) {
+inline void InsertExecutor::executePurgeFragmentIfNeeded(PersistentTable** ptrToTable) {
     PersistentTable* table = *ptrToTable;
     int tupleLimit = table->tupleLimit();
     int numTuples = table->visibleTupleCount();
@@ -172,7 +172,7 @@ void InsertExecutor::executePurgeFragmentIfNeeded(PersistentTable** ptrToTable) 
     }
 }
 
-bool InsertExecutor::p_execute_init(const TupleSchema *inputSchema,
+inline bool InsertExecutor::p_execute_init(const TupleSchema *inputSchema,
                                     TempTable *newOutputTable) {
     assert(m_node == dynamic_cast<InsertPlanNode*>(m_abstractNode));
     assert(m_node);
@@ -234,7 +234,7 @@ bool InsertExecutor::p_execute_init(const TupleSchema *inputSchema,
     return false;
 }
 
-void InsertExecutor::p_execute_tuple(TableTuple &tuple) {
+inline void InsertExecutor::p_execute_tuple(TableTuple &tuple) {
     const std::vector<int>& fieldMap = m_node->getFieldMap();
     std::size_t mapSize = fieldMap.size();
 
@@ -341,7 +341,7 @@ void InsertExecutor::p_execute_tuple(TableTuple &tuple) {
     return;
 }
 
-void InsertExecutor::p_execute_finish() {
+inline void InsertExecutor::p_execute_finish() {
     m_count_tuple.setNValue(0, ValueFactory::getBigIntValue(m_modifiedTuples));
     // put the tuple into the output table
     m_tmpOutputTable->insertTuple(m_count_tuple);

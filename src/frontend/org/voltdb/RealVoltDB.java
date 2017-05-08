@@ -57,7 +57,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -125,6 +124,7 @@ import org.voltdb.compiler.deploymentfile.SystemSettingsType;
 import org.voltdb.dtxn.InitiatorStats;
 import org.voltdb.dtxn.LatencyHistogramStats;
 import org.voltdb.dtxn.LatencyStats;
+import org.voltdb.dtxn.LatencyUncompressedHistogramStats;
 import org.voltdb.dtxn.SiteTracker;
 import org.voltdb.export.ExportManager;
 import org.voltdb.importer.ImportManager;
@@ -429,9 +429,10 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback, HostM
     // The configured license api: use to decide enterprise/community edition feature enablement
     LicenseApi m_licenseApi;
     String m_licenseInformation = "";
-    private LatencyStats m_latencyStats;
 
-    private LatencyHistogramStats m_latencyHistogramStats;
+    private LatencyStats m_latencyStats;
+    private LatencyHistogramStats m_latencyCompressedStats;
+    private LatencyUncompressedHistogramStats m_latencyHistogramStats;
 
     private File getConfigDirectory() {
         return getConfigDirectory(m_config);
@@ -1263,9 +1264,12 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback, HostM
             m_initiatorStats = new InitiatorStats(m_myHostId);
             m_liveClientsStats = new LiveClientsStats();
             getStatsAgent().registerStatsSource(StatsSelector.LIVECLIENTS, 0, m_liveClientsStats);
-            m_latencyStats = new LatencyStats(m_myHostId);
+
+            m_latencyStats = new LatencyStats();
             getStatsAgent().registerStatsSource(StatsSelector.LATENCY, 0, m_latencyStats);
-            m_latencyHistogramStats = new LatencyHistogramStats(m_myHostId);
+            m_latencyCompressedStats = new LatencyHistogramStats(m_myHostId);
+            getStatsAgent().registerStatsSource(StatsSelector.LATENCY_COMPRESSED, 0, m_latencyCompressedStats);
+            m_latencyHistogramStats = new LatencyUncompressedHistogramStats(m_myHostId);
             getStatsAgent().registerStatsSource(StatsSelector.LATENCY_HISTOGRAM,
                     0, m_latencyHistogramStats);
 
@@ -3237,6 +3241,7 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback, HostM
                 m_catalogContext = null;
                 m_initiatorStats = null;
                 m_latencyStats = null;
+                m_latencyCompressedStats = null;
                 m_latencyHistogramStats = null;
 
                 AdHocCompilerCache.clearHashCache();
@@ -3299,6 +3304,7 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback, HostM
             long currentTxnUniqueId,
             byte[] deploymentBytes,
             byte[] deploymentHash,
+            boolean requireCatalogDiffCmdsApplyToEE,
             boolean hasSchemaChange,
             boolean requiresNewExportGeneration)
     {
@@ -3382,7 +3388,7 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback, HostM
 
 
                 // 1. update the export manager.
-                ExportManager.instance().updateCatalog(m_catalogContext, diffCommands, requiresNewExportGeneration, partitions);
+                ExportManager.instance().updateCatalog(m_catalogContext, requireCatalogDiffCmdsApplyToEE, requiresNewExportGeneration, partitions);
 
                 // 1.1 Update the elastic join throughput settings
                 if (m_elasticJoinService != null) m_elasticJoinService.updateConfig(m_catalogContext);
@@ -3421,7 +3427,8 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback, HostM
                 // this after flushing the stats -- this will re-register
                 // the MPI statistics.
                 if (m_MPI != null) {
-                    m_MPI.updateCatalog(diffCommands, m_catalogContext, csp, requiresNewExportGeneration);
+                    m_MPI.updateCatalog(diffCommands, m_catalogContext, csp,
+                            requireCatalogDiffCmdsApplyToEE, requiresNewExportGeneration);
                 }
 
                 // Update catalog for import processor this should be just/stop start and updat partitions.

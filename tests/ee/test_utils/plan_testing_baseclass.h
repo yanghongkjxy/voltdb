@@ -47,6 +47,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <string.h>
+#include <sys/time.h>
 
 #include "catalog/cluster.h"
 #include "catalog/constraint.h"
@@ -246,9 +247,15 @@ public:
                   << nRows
                   << " rows."
                   << std::endl;
-        for (int row = 0; row < nRows; row += 1) {
-            if (row > 0 && (row % 100 == 0)) {
-                std::cout << '.';
+        ::timeval start_time;
+        gettimeofday(&start_time, NULL);
+        for (int row = 0, decile = 0; row < nRows; row += 1) {
+            if (decile <= 10.0*double(row)/double(nRows)) {
+                ::timeval now_time;
+                decile += 1;
+                gettimeofday(&now_time, NULL);
+                double elapsed_time = double_time(now_time) - double_time(start_time);
+                std::cout << "  Inserted" << row << " rows in " << elapsed_time << " seconds ( " << decile * 10 << "%)" << std::endl;
                 std::cout.flush();
             }
             voltdb::TableTuple &tuple = pTable->tempTuple();
@@ -332,13 +339,22 @@ public:
         }
         return ostr.str();
     }
+
+    double double_time(const ::timeval &tv) {
+        return static_cast<double>(tv.tv_sec) + static_cast<double>(tv.tv_usec)/1.0e6;
+    }
     /**
      * Execute a single test.  Execute the test's fragment, and then
      * validate the output table.
      */
     void executeTest(const TestConfig &test) {
         // The fragment number doesn't really matter here.
+        ::timeval test_start, test_end;
+        gettimeofday(&test_start, NULL);
         executeFragment(m_fragmentNumber, test.m_planString);
+        gettimeofday(&test_end, NULL);
+        double elapsed_time = double_time(test_end) - double_time(test_start);
+        std::cout << std::endl << "Fragment time: " << elapsed_time << " seconds." << std::endl;
         // If we have expected output data, then validate it.
         if (test.m_outputConfig != NULL) {
             validateResult(test.m_outputConfig, test.m_expectFail);

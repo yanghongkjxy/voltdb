@@ -498,7 +498,6 @@ if whichtests in ("${eetestsuite}", "executors"):
     CTX.TESTS['executors'] = """
     OptimizedProjectorTest
     MergeReceiveExecutorTest
-    TestInlineInsert
     """
 
 if whichtests in ("${eetestsuite}", "expressions"):
@@ -561,6 +560,8 @@ if whichtests in ("${eetestsuite}", "plannodes"):
 #
 CTX.GENERATOR_CLASSES = [
     "org.voltdb.planner.eegentests.GenerateEETests"
+    # Later for this.
+    # , "org.voltdb.planner.eegentests.GenerateEEPerfTests"
 ]
 ###############################################################################
 #

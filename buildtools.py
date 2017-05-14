@@ -534,8 +534,6 @@ def buildMakefile(CTX):
     makefile.write('\n')
     if CTX.TARGET == "VOLTRUN":
         makefile.write("main: prod/voltrun\n")
-    elif CTX.TARGET == "TEST":
-        makefile.write("main:\n")
     else:
         makefile.write("main: nativelibs/libvoltdb-%s.$(JNIEXT)\n" % version)
 

@@ -211,8 +211,13 @@ public class EEPlanGenerator extends PlannerTestCase {
     private boolean m_namesOnly = false;
 
     protected String getPlanString(String sqlStmt) throws JSONException {
-        AbstractPlanNode node = compile(sqlStmt);
-        String planString = PlanSelector.outputPlanDebugString(node);
+        return getPlanString(sqlStmt, 0);
+    }
+
+    protected String getPlanString(String sqlStmt, int fragmentNumber) throws JSONException {
+        List<AbstractPlanNode> nodes = compileToFragments(sqlStmt);
+        assert(fragmentNumber < nodes.size());
+        String planString = PlanSelector.outputPlanDebugString(nodes.get(fragmentNumber));
         return planString;
     }
 
@@ -710,7 +715,7 @@ public class EEPlanGenerator extends PlannerTestCase {
                   .append("        // Failure is expected\n")
                   .append(String.format("        %s,\n", tc.isExpectedToFail() ? "true" : "false"))
                   .append("        // Plan String\n")
-                  .append(String.format("        %s,\n", cleanString(getPlanString(tc.m_sqlString), "        ")))
+                  .append(String.format("        %s,\n", cleanString(getPlanString(tc.m_sqlString, tc.m_fragmentNumber), "        ")))
                   .append(String.format("        %s\n",  tc.getOutputTableName()))
                   .append("    },\n");
             }
@@ -825,10 +830,18 @@ public class EEPlanGenerator extends PlannerTestCase {
                 return "NULL";
             }
         }
+
+        // This returns the TestConfig so that we can cascade
+        // them when building tests.
+        public TestConfig setFragmentNumber(int number) {
+            m_fragmentNumber = number;
+            return this;
+        }
         private String      m_testName;
         private String      m_sqlString;
         private TableConfig m_expectedOutput;
         private boolean     m_expectFail;
+        private int         m_fragmentNumber;
     }
 
     /**

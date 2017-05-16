@@ -168,6 +168,7 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
         }
 
         if (m_stopping) {
+            s_logger.info("HH: stopping already set: " + assignment.getImporter() + ", do nothing");
             return;
         }
 
@@ -178,24 +179,36 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
         List<AbstractImporter> toStop = new ArrayList<>();
         List<String> missingRemovedURLs = new ArrayList<>();
         List<String> missingAddedURLs = new ArrayList<>();
+        StringBuilder msg = new StringBuilder("HH:");
         for (URI removed: assignment.getRemoved()) {
+            msg.append("\nRemove uri: " + removed.toASCIIString());
             if (m_configs.containsKey(removed)) {
+                msg.append(" found in config ");
                AbstractImporter importer = oldReference.get(removed);
                if (importer != null) {
                     toStop.add(importer);
+                    msg.append(" and added importer to stop list ");
+               }
+               else {
+                   msg.append(". Importer null, couldn't add to stop list");
                }
             } else {
+                msg.append(" NOT found in config, add to missing removed URI ");
                 missingRemovedURLs.add(removed.toString());
             }
         }
 
+        msg.append("Start importer list ");
         List<AbstractImporter> newImporters = new ArrayList<>();
         for (final URI added: assignment.getAdded()) {
+            msg.append("\nAdded uri: " + added.toASCIIString());
             if (m_configs.containsKey(added)) {
+                msg.append(" found in config ");
                 AbstractImporter importer = m_factory.createImporter(m_configs.get(added));
                 newImporters.add(importer);
                 builder.put(added, importer);
             } else {
+                msg.append(" NOT found in config ");
                 missingAddedURLs.add(added.toString());
             }
         }
@@ -205,6 +218,8 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
                     Joiner.on(", ").join(missingRemovedURLs) + "), added importer URL(s): (" +
                     Joiner.on(", ").join(missingAddedURLs) + "). Pause and Resume the database to refresh the importer.");
         }
+
+        s_logger.info(msg.toString());
 
         ImmutableMap<URI, AbstractImporter> newReference = builder.build();
         boolean success = m_importers.compareAndSet(oldReference, newReference);
@@ -264,7 +279,10 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
             success = m_importers.compareAndSet(oldReference, ImmutableMap.<URI, AbstractImporter> of());
         } while (!success);
 
-        if (!m_starting.get()) return;
+        if (!m_starting.get()) {
+            s_logger.info(" Server not in starting mode, stop returned");
+            return;
+        }
 
         stopImporters(oldReference.values());
         if (!m_factory.isImporterRunEveryWhere()) {
@@ -287,6 +305,7 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
     {
         for (AbstractImporter importer : importers) {
             try {
+                s_logger.info("stopImporter: " + importer.getName());
                 importer.stopImporter();
             } catch(Exception e) {
                 s_logger.warn("Error trying to stop importer resource ID " + importer.getResourceID(), e);

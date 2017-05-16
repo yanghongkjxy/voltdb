@@ -19,17 +19,24 @@ package org.voltdb.importer;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.osgi.framework.BundleException;
+
+import com.google_voltpatches.common.base.Preconditions;
+import com.google_voltpatches.common.base.Throwables;
+
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.messaging.HostMessenger;
 import org.voltdb.CatalogContext;
 import org.voltdb.StatsSelector;
 import org.voltdb.VoltDB;
+import org.voltdb.catalog.Procedure;
 import org.voltdb.compiler.deploymentfile.ImportType;
 import org.voltdb.importer.formatter.AbstractFormatterFactory;
 import org.voltdb.modular.ModuleManager;
@@ -107,6 +114,10 @@ public class ImportManager implements ChannelChangeCallback {
         em.create(myHostId, catalogContext);
     }
 
+    private final Map<String, AbstractImporterFactory> m_loadedBundles = new HashMap<String, AbstractImporterFactory>();
+    private final Map<String, AbstractImporterFactory> m_bundlesByType = new HashMap<String, AbstractImporterFactory>();
+
+
     /**
      * This creates a import connector from configuration provided.
      * @param myHostId
@@ -146,12 +157,99 @@ public class ImportManager implements ChannelChangeCallback {
                 }
             }
 
-            newProcessor.setProcessorConfig(catalogContext, m_processorConfig);
-            m_processor.set(newProcessor);
+//            newProcessor.setProcessorConfig(catalogContext, m_processorConfig);
+//            m_processor.set(newProcessor);
+            if (inspectImportConfigAndLoadBundles(catalogContext) == true) {
+                m_processor.set(newProcessor);
+                newProcessor.setProcessorConfig(m_processorConfig, m_loadedBundles);
+                m_processor.set(newProcessor);
+            }
         } catch (final Exception e) {
             VoltDB.crashLocalVoltDB("Error creating import processor", true, e);
         }
     }
+
+    private boolean inspectImportConfigAndLoadBundles(CatalogContext catalogContext) {
+        boolean workToDo = false;
+        List<String> configuredImporters = new ArrayList<String>();
+        for (String configName : m_processorConfig.keySet()) {
+            ImportConfiguration importConfig = m_processorConfig.get(configName);
+            Properties properties = importConfig.getmoduleProperties();
+
+            String importBundleJar = properties.getProperty(ImportDataProcessor.IMPORT_MODULE);
+            Preconditions.checkNotNull(importBundleJar,
+                    "Import source is undefined or custom export plugin class missing.");
+            String procedure = properties.getProperty(ImportDataProcessor.IMPORT_PROCEDURE);
+            //TODO: If processors is a list dont start till all procedures exists.
+            Procedure catProc = catalogContext.procedures.get(procedure);
+            if (catProc == null) {
+                catProc = catalogContext.m_defaultProcs.checkForDefaultProcedure(procedure);
+            }
+
+            if (catProc == null) {
+                importLog.info("Importer " + configName + " Procedure " + procedure +
+                        " is missing will disable this importer until the procedure becomes available.");
+                continue;
+            }
+            configuredImporters.add(configName);
+            workToDo |= loadImporterBundles(properties);
+
+        }
+        importLog.info("Import Processor is configured. Configured Importers(" + configuredImporters.size()
+            + ": " + configuredImporters);
+        return workToDo;
+    }
+
+
+
+    private boolean loadImporterBundles(Properties moduleProperties){
+        String importModuleName = moduleProperties.getProperty(ImportDataProcessor.IMPORT_MODULE);
+        String attrs[] = importModuleName.split("\\|");
+        String bundleJar = attrs[1];
+        String moduleType = attrs[0];
+
+        try {
+            AbstractImporterFactory importerFactory = m_loadedBundles.get(bundleJar);
+            if (importerFactory == null) {
+                if (moduleType.equalsIgnoreCase("osgi")) {
+                    URI bundleURI = URI.create(bundleJar);
+                    importerFactory = m_moduleManager.getService(bundleURI, AbstractImporterFactory.class);
+                    if (importerFactory == null) {
+                        importLog.error("Failed to initialize importer from: " + bundleJar);
+                        return false;
+                    }
+                } else {
+                    // class based importer.
+                    Class<?> reference = this.getClass().getClassLoader().loadClass(bundleJar);
+                    if (reference == null) {
+                        importLog.error("Failed to initialize importer from: " + bundleJar);
+                        return false;
+                    }
+                    importerFactory = (AbstractImporterFactory)reference.newInstance();
+                }
+                String importerType = importerFactory.getTypeName();
+                if (importerType == null || importerType.trim().isEmpty()) {
+                    throw new RuntimeException("Importer must implement and return a valid unique name.");
+                }
+                Preconditions.checkState(!m_bundlesByType.containsKey(importerType), "Importer must implement and return a valid unique name: " + importerType);
+                if (!m_bundlesByType.isEmpty()) {
+                    StringBuilder debugMsg = new StringBuilder("HH: bundles by name: " + m_bundlesByType.keySet().toString());
+                    importLog.info(debugMsg.toString());
+                }
+                if (!m_loadedBundles.isEmpty()) {
+                    StringBuilder debugMsg = new StringBuilder("HH: bundles: " + m_loadedBundles.keySet().toString());
+                    importLog.info(debugMsg.toString());
+                }
+                m_bundlesByType.put(importerType, importerFactory);
+                m_loadedBundles.put(bundleJar, importerFactory);
+            }
+        } catch(Throwable t) {
+            importLog.error("Failed to configure import handler for " + bundleJar, t);
+            Throwables.propagate(t);
+        }
+        importLog.info("List of loaded jar modules: " + m_loadedBundles.keySet() +", importer types: " + m_bundlesByType.keySet());
+        return true;
+}
 
     public static int getPartitionsCount() {
         if (m_self.m_processor.get() != null) {

@@ -52,7 +52,9 @@ public interface ImportDataProcessor  {
      * @param context current catalog context
      * @param config an instance of {@linkplain Properties}
      */
-    public void setProcessorConfig(CatalogContext context, Map<String, ImportConfiguration> config);
+//    public void setProcessorConfig(CatalogContext context, Map<String, ImportConfiguration> config);
+
+    public void setProcessorConfig(Map<String, ImportConfiguration> config, final Map<String, AbstractImporterFactory> bundles);
 
     public int getPartitionsCount();
 

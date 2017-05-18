@@ -40,6 +40,7 @@ import org.voltdb.importer.formatter.FormatterBuilder;
 
 import com.google_voltpatches.common.base.Joiner;
 import com.google_voltpatches.common.base.Predicate;
+import com.google_voltpatches.common.collect.ImmutableCollection;
 import com.google_voltpatches.common.collect.ImmutableMap;
 import com.google_voltpatches.common.collect.Maps;
 import com.google_voltpatches.common.util.concurrent.ListeningExecutorService;
@@ -288,7 +289,14 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
             return;
         }
 
-        stopImporters(oldReference.values());
+        ImmutableCollection<AbstractImporter> importersToStop = oldReference.values();
+        StringBuilder msg = new StringBuilder("HH: importersToStop ");
+        for (AbstractImporter importer : importersToStop) {
+            msg.append(importer.getName() + " ");
+        }
+        s_logger.info(msg.toString());
+
+        stopImporters(importersToStop);
         if (!m_factory.isImporterRunEveryWhere()) {
             m_distributer.registerChannels(m_distributerDesignation, Collections.<URI> emptySet());
             m_distributer.unregisterCallback(m_distributerDesignation);
@@ -297,24 +305,26 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
         if (m_executorService != null) {
             m_executorService.shutdown();
             try {
-                m_executorService.awaitTermination(IMPORTER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+//                m_executorService.awaitTermination(IMPORTER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                m_executorService.awaitTermination(365, TimeUnit.DAYS);
             } catch (InterruptedException ex) {
                 //Should never come here.
                 s_logger.warn("Unexpected interrupted exception waiting for " + m_factory.getTypeName() + " to shutdown", ex);
-            } finally {
-                if (!m_executorService.isShutdown()) {
-                    m_executorService.shutdownNow();
-                    try {
-                        if (m_executorService.awaitTermination(IMPORTER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                            s_logger.info("HH: stopImporter - Importer force shutdown for " + m_factory.getTypeName()
-                            + " completed");
-                        } else {
-                            s_logger.info("HH: stopImporter - Importer force shutdown timedout" + m_factory.getTypeName()
-                                + " didn't complete");
-                        }
-                    } catch (Throwable ignore) { }
-                }
             }
+//            finally {
+//                if (!m_executorService.isShutdown()) {
+//                    m_executorService.shutdownNow();
+//                    try {
+//                        if (m_executorService.awaitTermination(IMPORTER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+//                            s_logger.info("HH: stopImporter - Importer force shutdown for " + m_factory.getTypeName()
+//                            + " completed");
+//                        } else {
+//                            s_logger.info("HH: stopImporter - Importer force shutdown timedout" + m_factory.getTypeName()
+//                                + " didn't complete");
+//                        }
+//                    } catch (Throwable ignore) { }
+//                }
+//            }
         }
     }
 

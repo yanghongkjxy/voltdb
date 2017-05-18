@@ -114,8 +114,10 @@ public class ImportManager implements ChannelChangeCallback {
         em.create(myHostId, catalogContext);
     }
 
-    private final Map<String, AbstractImporterFactory> m_loadedBundles = new HashMap<String, AbstractImporterFactory>();
-    private final Map<String, AbstractImporterFactory> m_bundlesByType = new HashMap<String, AbstractImporterFactory>();
+    private Map<String, AbstractImporterFactory> m_loadedBundles = new HashMap<String, AbstractImporterFactory>();
+    private Map<String, AbstractImporterFactory> m_bundlesByType = new HashMap<String, AbstractImporterFactory>();
+//    private Map<String, AbstractImporterFactory> m_importerFactories = new HashMap<String, AbstractImporterFactory>();
+    private Map<String, ImportConfiguration> m_configsForProcessor= new HashMap<String, ImportConfiguration>();
 
 
     /**
@@ -159,9 +161,9 @@ public class ImportManager implements ChannelChangeCallback {
 
 //            newProcessor.setProcessorConfig(catalogContext, m_processorConfig);
 //            m_processor.set(newProcessor);
-            if (inspectImportConfigAndLoadBundles(catalogContext) == true) {
-                m_processor.set(newProcessor);
-                newProcessor.setProcessorConfig(m_processorConfig, m_loadedBundles);
+            discoverConfigsAndLoadBundles(catalogContext);
+            if (!m_configsForProcessor.isEmpty()) {
+                newProcessor.setProcessorConfig(m_configsForProcessor, m_loadedBundles);
                 m_processor.set(newProcessor);
             }
         } catch (final Exception e) {
@@ -169,9 +171,10 @@ public class ImportManager implements ChannelChangeCallback {
         }
     }
 
-    private boolean inspectImportConfigAndLoadBundles(CatalogContext catalogContext) {
-        boolean workToDo = false;
+    private void discoverConfigsAndLoadBundles(CatalogContext catalogContext) {
+
         List<String> configuredImporters = new ArrayList<String>();
+        m_configsForProcessor.clear();
         for (String configName : m_processorConfig.keySet()) {
             ImportConfiguration importConfig = m_processorConfig.get(configName);
             Properties properties = importConfig.getmoduleProperties();
@@ -192,17 +195,24 @@ public class ImportManager implements ChannelChangeCallback {
                 continue;
             }
             configuredImporters.add(configName);
-            workToDo |= loadImporterBundles(properties);
-
+            if (loadImporterBundle(properties)) {
+                m_configsForProcessor.put(configName, importConfig);
+            }
         }
         importLog.info("Import Processor is configured. Configured Importers(" + configuredImporters.size()
             + ": " + configuredImporters);
-        return workToDo;
+//        return workToDo;
     }
 
 
 
-    private boolean loadImporterBundles(Properties moduleProperties){
+    /**
+     * Functions checks if the importer factory exists for the given importer modules specified in the
+     * properties. If not, creates ones. Than populates the bundle entry in the cache listed of the bundles     *
+     *
+     * @param moduleProperties
+     */
+    private boolean loadImporterBundle(Properties moduleProperties){
         String importModuleName = moduleProperties.getProperty(ImportDataProcessor.IMPORT_MODULE);
         String attrs[] = importModuleName.split("\\|");
         String bundleJar = attrs[1];
@@ -232,17 +242,18 @@ public class ImportManager implements ChannelChangeCallback {
                     throw new RuntimeException("Importer must implement and return a valid unique name.");
                 }
                 Preconditions.checkState(!m_bundlesByType.containsKey(importerType), "Importer must implement and return a valid unique name: " + importerType);
-                if (!m_bundlesByType.isEmpty()) {
-                    StringBuilder debugMsg = new StringBuilder("HH: bundles by name: " + m_bundlesByType.keySet().toString());
-                    importLog.info(debugMsg.toString());
-                }
-                if (!m_loadedBundles.isEmpty()) {
-                    StringBuilder debugMsg = new StringBuilder("HH: bundles: " + m_loadedBundles.keySet().toString());
-                    importLog.info(debugMsg.toString());
-                }
+//                if (!m_bundlesByType.isEmpty()) {
+//                    StringBuilder debugMsg = new StringBuilder("HH: bundles by name: " + m_bundlesByType.keySet().toString());
+//                    importLog.info(debugMsg.toString());
+//                }
+//                if (!m_loadedBundles.isEmpty()) {
+//                    StringBuilder debugMsg = new StringBuilder("HH: bundles: " + m_loadedBundles.keySet().toString());
+//                    importLog.info(debugMsg.toString());
+//                }
                 m_bundlesByType.put(importerType, importerFactory);
                 m_loadedBundles.put(bundleJar, importerFactory);
             }
+//            m_importerFactories.put(bundleJar, importerFactory);
         } catch(Throwable t) {
             importLog.error("Failed to configure import handler for " + bundleJar, t);
             Throwables.propagate(t);

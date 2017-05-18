@@ -133,15 +133,15 @@ public class ImportProcessor implements ImportDataProcessor {
             }
         });
         // wait for start
-        try {
-            if(task.get() == null) {
-                m_logger.info("Importer started ");
-            }
-            else {
-                m_logger.info("Importer starting, blocking did not help");
-            }
-        } catch (Exception e) {
-        }
+//        try {
+//            if(task.get() == null) {
+//                m_logger.info("Importer started ");
+//            }
+//            else {
+//                m_logger.info("Importer starting, blocking did not help");
+//            }
+//        } catch (Exception e) {
+//        }
     }
 
     @Override
@@ -184,18 +184,19 @@ public class ImportProcessor implements ImportDataProcessor {
         StringBuilder msg = new StringBuilder("HH: Importerprocess shutdown wait ");
         try {
             m_es.shutdown();
-            if (m_es.awaitTermination(30, TimeUnit.SECONDS)) {
-                msg.append("- Shutdown completed");
-            }
-            else {
-                msg.append(" - Timedout waiting for shutdown to complete");
-                m_es.shutdownNow();
-                if (!m_es.awaitTermination(30, TimeUnit.SECONDS)) {
-                    msg.append(". Force shutdown suceeeded");
-                } else {
-                    msg.append(". Force shutdown suceeeded");
-                }
-            }
+            m_es.awaitTermination(365, TimeUnit.DAYS);
+//            if (m_es.awaitTermination(30, TimeUnit.SECONDS)) {
+//                msg.append("- Shutdown completed");
+//            }
+//            else {
+//                msg.append(" - Timedout waiting for shutdown to complete");
+//                m_es.shutdownNow();
+//                if (!m_es.awaitTermination(30, TimeUnit.SECONDS)) {
+//                    msg.append(". Force shutdown suceeeded");
+//                } else {
+//                    msg.append(". Force shutdown suceeeded");
+//                }
+//            }
         } catch (InterruptedException ex) {
             m_logger.error("Failed to stop import processor executor.", ex);
         } finally {

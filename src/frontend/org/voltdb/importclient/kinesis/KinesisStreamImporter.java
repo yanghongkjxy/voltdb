@@ -59,9 +59,11 @@ public class KinesisStreamImporter extends AbstractImporter {
     private AtomicLong m_cbcnt = new AtomicLong(0);
 
     private Worker m_worker;
+    private String m_workerId;
 
     public KinesisStreamImporter(KinesisStreamImporterConfig config) {
         m_config = config;
+        m_workerId = UUID.randomUUID().toString();
     }
 
     @Override
@@ -70,12 +72,16 @@ public class KinesisStreamImporter extends AbstractImporter {
     }
 
     @Override
-    public void accept() {
+    public String getTaskThreadName() {
+        return getName() + "-" + m_config.getAppName() + "-" + m_workerId;
+    };
 
+    @Override
+    public void accept() {
         info(null, "Starting data stream fetcher for " + m_config.getResourceID().toString());
         try {
             KinesisClientLibConfiguration kclConfig = new KinesisClientLibConfiguration(m_config.getAppName(),
-                    m_config.getStreamName(), credentials(), UUID.randomUUID().toString());
+                    m_config.getStreamName(), credentials(), m_workerId);
 
             kclConfig.withRegionName(m_config.getRegion()).withMaxRecords((int) m_config.getMaxReadBatchSize())
                     .withInitialPositionInStream(InitialPositionInStream.TRIM_HORIZON)
@@ -88,14 +94,21 @@ public class KinesisStreamImporter extends AbstractImporter {
             m_worker = new Worker.Builder().recordProcessorFactory(new RecordProcessorFactory()).config(kclConfig)
                     .build();
 
+            if (!shouldRun()) {
+                info (null, "HH: Kinesis stopping, so will not start");
+                m_worker.shutdown();
+                return;
+            }
             m_worker.run();
 
         } catch (RuntimeException e) {
 
             //aws silences all the exceptions but IllegalArgumentException, throw RuntimeException.
             rateLimitedLog(Level.ERROR, e, "Error in Kinesis stream importer %s", m_config.getResourceID());
-            if (null != m_worker)
-                m_worker.shutdown();
+            if (null != m_worker) {
+                //m_worker.shutdown();
+                shutDowntWorker();
+            }
 
         }
 
@@ -106,9 +119,21 @@ public class KinesisStreamImporter extends AbstractImporter {
 
     @Override
     public void stop() {
-        if (null != m_worker) {
-            m_worker.shutdown();
+
+        info(null, "HH: shutdown received " + getTaskThreadName());
+        shutDowntWorker();
+    }
+
+    private void shutDowntWorker() {
+
+        if (m_worker == null) {
+            info(null, "HH: worker not initialized yet, shutdown not invoked" + m_workerId);
+            return ;
         }
+        info(null, "shutdown seen " + m_workerId);
+//        ExecutorService shutdownExecutor = CoreUtils.getSingleThreadExecutor(m_workerId, CoreUtils.MEDIUM_STACK_SIZE);
+//        return shutdownExecutor.submit(() -> m_worker.shutdown());
+        m_worker.shutdown();
     }
 
     @Override

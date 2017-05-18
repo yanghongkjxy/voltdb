@@ -55,6 +55,7 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
 {
     private final static VoltLogger s_logger = new VoltLogger("ImporterTypeManager");
     public static final int MEDIUM_STACK_SIZE = 1024 * 512;
+    private final static long IMPORTER_SHUTDOWN_TIMEOUT_SECONDS = 60;
 
     private final AbstractImporterFactory m_factory;
     private ListeningExecutorService m_executorService;
@@ -148,6 +149,9 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
 
     private void startImporters(Collection<AbstractImporter> importers)
     {
+        if (m_stopping == true) {
+            s_logger.info("Start importers called during shutdown phase");
+        }
         for (AbstractImporter importer : importers) {
             submitAccept(importer);
         }
@@ -293,10 +297,23 @@ public class ImporterLifeCycleManager implements ChannelChangeCallback
         if (m_executorService != null) {
             m_executorService.shutdown();
             try {
-                m_executorService.awaitTermination(365, TimeUnit.DAYS);
+                m_executorService.awaitTermination(IMPORTER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             } catch (InterruptedException ex) {
                 //Should never come here.
                 s_logger.warn("Unexpected interrupted exception waiting for " + m_factory.getTypeName() + " to shutdown", ex);
+            } finally {
+                if (!m_executorService.isShutdown()) {
+                    m_executorService.shutdownNow();
+                    try {
+                        if (m_executorService.awaitTermination(IMPORTER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                            s_logger.info("HH: stopImporter - Importer force shutdown for " + m_factory.getTypeName()
+                            + " completed");
+                        } else {
+                            s_logger.info("HH: stopImporter - Importer force shutdown timedout" + m_factory.getTypeName()
+                                + " didn't complete");
+                        }
+                    } catch (Throwable ignore) { }
+                }
             }
         }
     }

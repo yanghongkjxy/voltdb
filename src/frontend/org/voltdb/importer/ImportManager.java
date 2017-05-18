@@ -64,7 +64,7 @@ public class ImportManager implements ChannelChangeCallback {
 
     private final int m_myHostId;
     private ChannelDistributer m_distributer;
-    private boolean m_serverStarted;
+    private volatile boolean m_serverStarted;
     private final ImporterStatsCollector m_statsCollector;
     private final ModuleManager m_moduleManager;
 

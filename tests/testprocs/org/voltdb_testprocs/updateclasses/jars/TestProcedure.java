@@ -21,27 +21,26 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package txnIdSelfCheck.procedures;
+package org.voltdb_testprocs.updateclasses.jars;
 
 import org.voltdb.SQLStmt;
 import org.voltdb.VoltProcedure;
 import org.voltdb.VoltTable;
 
-public class DeleteLoadPartitionedBase extends VoltProcedure {
+// This procedure is something like the one
+public class TestProcedure extends VoltProcedure {
+    // addSQLStmt.jar
+    public SQLStmt sql = new SQLStmt("select pid, city from TT where pid = ?");
 
-    public long doWork(SQLStmt delete, SQLStmt deletecp, long cid) {
+    // addSQLStmtNew.jar
+    // public SQLStmt sql = new SQLStmt("select lower(pid), lower(?) from TT where pid = ?");
 
-        voltQueueSQL(delete, cid);
-        VoltTable[] results = voltExecuteSQL();
-        long del = results[0].asScalarLong();
-        voltQueueSQL(deletecp, cid);
-        results = voltExecuteSQL();
-        long delcp = results[0].asScalarLong();
-        return (del>0?2:0) + (delcp>0?1:0);  // the result is a 2 bit bitmap
+    // addSQLStmtInvalid.jar
+    // public SQLStmt sql = new SQLStmt("select pid from TT_Invalid where pid = ?");
+
+    public long run(String pid, String city) {
+        voltQueueSQL(sql, pid);
+        VoltTable vt = voltExecuteSQL()[0];
+        return vt.getRowCount();
     }
-
-    public long run() {
-        return 0; // never called in base procedure
-    }
-
 }

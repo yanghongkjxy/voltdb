@@ -21,27 +21,8 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package txnIdSelfCheck.procedures;
-
-import org.voltdb.SQLStmt;
-import org.voltdb.VoltProcedure;
-import org.voltdb.VoltTable;
-
-public class DeleteLoadPartitionedBase extends VoltProcedure {
-
-    public long doWork(SQLStmt delete, SQLStmt deletecp, long cid) {
-
-        voltQueueSQL(delete, cid);
-        VoltTable[] results = voltExecuteSQL();
-        long del = results[0].asScalarLong();
-        voltQueueSQL(deletecp, cid);
-        results = voltExecuteSQL();
-        long delcp = results[0].asScalarLong();
-        return (del>0?2:0) + (delcp>0?1:0);  // the result is a 2 bit bitmap
-    }
-
-    public long run() {
-        return 0; // never called in base procedure
-    }
-
-}
+/**
+ * A fake use case intended for use verifying that 'voltdb init --classes' works with non-trivial use cases.
+ * The theme is querying translations for 'Hello' in different languages.
+ */
+package fakeusecase.greetings;

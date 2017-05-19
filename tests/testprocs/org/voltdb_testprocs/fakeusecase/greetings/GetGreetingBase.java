@@ -21,27 +21,25 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package txnIdSelfCheck.procedures;
+package org.voltdb_testprocs.fakeusecase.greetings;
 
 import org.voltdb.SQLStmt;
 import org.voltdb.VoltProcedure;
 import org.voltdb.VoltTable;
 
-public class DeleteLoadPartitionedBase extends VoltProcedure {
+/** A base class with no external dependencies. */
+public class GetGreetingBase extends VoltProcedure {
 
-    public long doWork(SQLStmt delete, SQLStmt deletecp, long cid) {
+    protected static final SQLStmt SELECT_BY_LANGUAGE_STATEMENT = new SQLStmt("SELECT * FROM greetings WHERE language = ?");
+    protected static final SQLStmt INCREMENT_STATS_STATEMENT = new SQLStmt("UPDATE greetings SET querycount = querycount + 1 WHERE language = ?");
 
-        voltQueueSQL(delete, cid);
-        VoltTable[] results = voltExecuteSQL();
-        long del = results[0].asScalarLong();
-        voltQueueSQL(deletecp, cid);
-        results = voltExecuteSQL();
-        long delcp = results[0].asScalarLong();
-        return (del>0?2:0) + (delcp>0?1:0);  // the result is a 2 bit bitmap
+    protected void incrementCounterIfNeeded(VoltTable[] resultsFromSelect, boolean thisIsLast) {
+        if (resultsFromSelect.length > 0 && resultsFromSelect[0].getRowCount() > 0) {
+            resultsFromSelect[0].advanceRow();
+            // Fetch language again because, in derived classes, it may be different than the argument passed in.
+            String language = resultsFromSelect[0].getString("language");
+            voltQueueSQL(INCREMENT_STATS_STATEMENT, EXPECT_EMPTY, language);
+            voltExecuteSQL(thisIsLast);
+        }
     }
-
-    public long run() {
-        return 0; // never called in base procedure
-    }
-
 }

@@ -21,27 +21,16 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package txnIdSelfCheck.procedures;
+package org.voltdb_testprocs.fakeusecase.greetings;
 
-import org.voltdb.SQLStmt;
-import org.voltdb.VoltProcedure;
 import org.voltdb.VoltTable;
 
-public class DeleteLoadPartitionedBase extends VoltProcedure {
-
-    public long doWork(SQLStmt delete, SQLStmt deletecp, long cid) {
-
-        voltQueueSQL(delete, cid);
+public class GetGreetingExactMatch extends GetGreetingBase {
+    /** Gets the greeting which matches the specified language exactly */
+    public VoltTable[] run(String language) {
+        voltQueueSQL(SELECT_BY_LANGUAGE_STATEMENT, EXPECT_ZERO_OR_ONE_ROW, language);
         VoltTable[] results = voltExecuteSQL();
-        long del = results[0].asScalarLong();
-        voltQueueSQL(deletecp, cid);
-        results = voltExecuteSQL();
-        long delcp = results[0].asScalarLong();
-        return (del>0?2:0) + (delcp>0?1:0);  // the result is a 2 bit bitmap
+        incrementCounterIfNeeded(results, true);
+        return results;
     }
-
-    public long run() {
-        return 0; // never called in base procedure
-    }
-
 }

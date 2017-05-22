@@ -293,11 +293,12 @@ class __attribute__((visibility("default"))) VoltDBEngine {
 
         ReferenceSerializeOutput* getExceptionOutputSerializer() { return &m_exceptionOutput; }
 
-        void setBuffers(char *parameter_buffer, int m_parameterBuffercapacity,
-                char* perFragmentStatsBuffer, int perFragmentStatsBufferCapacity,
-                char *firstResultBuffer, int firstResultBufferCapacity,
-                char *nextResultBuffer, int nextResultBufferCapacity,
-                char *exceptionBuffer, int exceptionBufferCapacity);
+        void setBuffers(char* parameter_buffer,       int m_parameterBuffercapacity,
+                        char* perFragmentStatsBuffer, int perFragmentStatsBufferCapacity,
+                        char* udfBuffer,              int udfBufferCapacity,
+                        char* firstResultBuffer,      int firstResultBufferCapacity,
+                        char* nextResultBuffer,       int nextResultBufferCapacity,
+                        char* exceptionBuffer,        int exceptionBufferCapacity);
 
         const char* getParameterBuffer() const { return m_parameterBuffer; }
 
@@ -652,6 +653,9 @@ class __attribute__((visibility("default"))) VoltDBEngine {
 
         /** size of m_finalReusedResultBuffer. */
         int m_nextReusedResultCapacity;
+
+        char* m_udfBuffer;
+        int m_udfBufferCapacity;
 
         // arrays to hold fragment ids and dep ids from java
         // n.b. these are 8k each, should be boost shared arrays?

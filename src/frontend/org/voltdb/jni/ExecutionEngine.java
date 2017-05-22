@@ -898,19 +898,23 @@ public abstract class ExecutionEngine implements FastDeserializer.Deserializatio
      * @param parameter_buffer_size
      * @param per_fragment_stats_buffer
      * @param per_fragment_stats_buffer_size
-     * @param firstResultBuffer
+     * @param udf_buffer
+     * @param udf_buffer_size
+     * @param first_result_buffer
      * @param first_result_buffer_size
-     * @param finalResultBuffer
+     * @param final_result_buffer
      * @param final_result_buffer_size
-     * @param exceptionBuffer
+     * @param exception_buffer
      * @param exception_buffer_size
      * @return error code
      */
-    protected native int nativeSetBuffers(long pointer, ByteBuffer parameter_buffer, int parameter_buffer_size,
+    protected native int nativeSetBuffers(long pointer,
+                                          ByteBuffer parameter_buffer,          int parameter_buffer_size,
                                           ByteBuffer per_fragment_stats_buffer, int per_fragment_stats_buffer_size,
-                                          ByteBuffer firstResultBuffer, int first_result_buffer_size,
-                                          ByteBuffer finalResultBuffer, int final_result_buffer_size,
-                                          ByteBuffer exceptionBuffer, int exception_buffer_size);
+                                          ByteBuffer udf_buffer,                int udf_buffer_size,
+                                          ByteBuffer first_result_buffer,       int first_result_buffer_size,
+                                          ByteBuffer final_result_buffer,       int final_result_buffer_size,
+                                          ByteBuffer exception_buffer,          int exception_buffer_size);
 
     /**
      * Load the system catalog for this engine.

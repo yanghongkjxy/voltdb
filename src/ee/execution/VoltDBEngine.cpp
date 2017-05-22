@@ -1488,16 +1488,21 @@ int32_t VoltDBEngine::getPerFragmentStatsSize() const {
     return static_cast<int32_t>(m_perFragmentStatsOutput.size());
 }
 
-void VoltDBEngine::setBuffers(char* parameterBuffer, int parameterBufferCapacity,
-        char* perFragmentStatsBuffer, int perFragmentStatsBufferCapacity,
-        char *firstResultBuffer, int firstResultBufferCapacity,
-        char *nextResultBuffer, int nextResultBufferCapacity,
-        char *exceptionBuffer, int exceptionBufferCapacity) {
+void VoltDBEngine::setBuffers(
+            char* parameterBuffer,        int parameterBufferCapacity,
+            char* perFragmentStatsBuffer, int perFragmentStatsBufferCapacity,
+            char* udfBuffer,              int udfBufferCapacity,
+            char* firstResultBuffer,      int firstResultBufferCapacity,
+            char* nextResultBuffer,       int nextResultBufferCapacity,
+            char* exceptionBuffer,        int exceptionBufferCapacity) {
     m_parameterBuffer = parameterBuffer;
     m_parameterBufferCapacity = parameterBufferCapacity;
 
     m_perFragmentStatsBuffer = perFragmentStatsBuffer;
     m_perFragmentStatsBufferCapacity = perFragmentStatsBufferCapacity;
+
+    m_udfBuffer = udfBuffer;
+    m_udfBufferCapacity = udfBufferCapacity;
 
     m_firstReusedResultBuffer = firstResultBuffer;
     m_firstReusedResultCapacity = firstResultBufferCapacity;

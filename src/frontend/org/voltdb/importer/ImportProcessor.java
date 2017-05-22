@@ -23,8 +23,6 @@ import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.messaging.HostMessenger;
 import org.voltcore.utils.CoreUtils;
@@ -32,7 +30,6 @@ import org.voltdb.CatalogContext;
 import org.voltdb.ImporterServerAdapterImpl;
 import org.voltdb.VoltDB;
 import org.voltdb.importer.formatter.FormatterBuilder;
-import org.voltdb.modular.ModuleManager;
 import org.voltdb.utils.CatalogUtil.ImportConfiguration;
 
 import com.google_voltpatches.common.base.Throwables;
@@ -41,22 +38,18 @@ import java.util.concurrent.ExecutionException;
 public class ImportProcessor implements ImportDataProcessor {
 
     private static final VoltLogger m_logger = new VoltLogger("IMPORT");
-    private final Map<String, ImporterWrapper> m_bundles = new HashMap<String, ImporterWrapper>();
-    private final ModuleManager m_moduleManager;
+    private final Map<String, ImporterWrapper> m_importers = new HashMap<String, ImporterWrapper>();
     private final ChannelDistributer m_distributer;
     private final ExecutorService m_es = CoreUtils.getSingleThreadExecutor("ImportProcessor");
     private final ImporterServerAdapter m_importServerAdapter;
     private final String m_clusterTag;
-    private AtomicBoolean m_stopping =  new AtomicBoolean(false);
 
-    public ImportProcessor(
-            int myHostId,
+
+    public ImportProcessor(int myHostId,
             ChannelDistributer distributer,
-            ModuleManager moduleManager,
             ImporterStatsCollector statsCollector,
             String clusterTag)
     {
-        m_moduleManager = moduleManager;
         m_distributer = distributer;
         m_importServerAdapter = new ImporterServerAdapterImpl(statsCollector);
         m_clusterTag = clusterTag;
@@ -64,7 +57,6 @@ public class ImportProcessor implements ImportDataProcessor {
 
     //This abstracts OSGi based and class based importers.
     public class ImporterWrapper {
-//        private final URI m_bundleURI;
         private AbstractImporterFactory m_importerFactory;
         private ImporterLifeCycleManager m_importerTypeMgr;
 
@@ -102,7 +94,7 @@ public class ImportProcessor implements ImportDataProcessor {
     @Override
     public int getPartitionsCount() {
         int count = 0;
-        for (ImporterWrapper wapper : m_bundles.values()) {
+        for (ImporterWrapper wapper : m_importers.values()) {
             if (wapper != null) {
                 count += wapper.getConfigsCount();
             }
@@ -112,15 +104,10 @@ public class ImportProcessor implements ImportDataProcessor {
 
     @Override
     public synchronized void readyForData(final CatalogContext catContext, final HostMessenger messenger) {
-
-        if (m_stopping.get()) {
-            m_logger.info("HH: !!!!!READY for data called during shutdown");
-        }
-
-        Future<?> task = m_es.submit(new Runnable() {
+        m_es.submit(new Runnable() {
             @Override
             public void run() {
-                for (ImporterWrapper bw : m_bundles.values()) {
+                for (ImporterWrapper bw : m_importers.values()) {
                     try {
                         bw.m_importerTypeMgr.readyForData();
                     } catch (Exception ex) {
@@ -135,23 +122,20 @@ public class ImportProcessor implements ImportDataProcessor {
 
     @Override
     public synchronized void shutdown() {
-        if (!m_stopping.compareAndSet(false, true)) {
-            m_logger.info("HH: ImportProcessor - already in shutdown sequence .... ");
-        }
         //Task that shutdowns all the bundles we wait for it to finish.
         Future<?> task = m_es.submit(new Runnable() {
             @Override
             public void run() {
                 try {
                     //Stop all the bundle wrappers.
-                    for (ImporterWrapper bw : m_bundles.values()) {
+                    for (ImporterWrapper bw : m_importers.values()) {
                         try {
                             bw.stop();
                         } catch (Exception ex) {
                             m_logger.error("Failed to stop the import handler: " + bw.m_importerFactory.getTypeName(), ex);
                         }
                     }
-                    m_bundles.clear();
+                    m_importers.clear();
                 } catch (Exception ex) {
                     m_logger.error("Failed to stop the import bundles.", ex);
                     Throwables.propagate(ex);
@@ -161,23 +145,15 @@ public class ImportProcessor implements ImportDataProcessor {
 
         //And wait for it.
         try {
-            if (task.get() == null) {
-                m_logger.info("HH: ImportProcessor - Importers stopped sucessfully");
-            }
-            else {
-                m_logger.info("HH: ImportProcessor - Importers couldn't be stopped sucessfully");
-            }
+            task.get();
         } catch (InterruptedException | ExecutionException ex) {
             m_logger.error("Failed to stop import processor.", ex);
         }
-        StringBuilder msg = new StringBuilder("HH: Importerprocess shutdown ");
         try {
             m_es.shutdown();
             m_es.awaitTermination(365, TimeUnit.DAYS);
         } catch (InterruptedException ex) {
             m_logger.error("Failed to stop import processor executor.", ex);
-        } finally {
-            m_logger.info(msg.toString());
         }
     }
 
@@ -191,7 +167,7 @@ public class ImportProcessor implements ImportDataProcessor {
         FormatterBuilder formatterBuilder = config.getFormatterBuilder();
         try {
 
-            ImporterWrapper wrapper = m_bundles.get(bundleJar);
+            ImporterWrapper wrapper = m_importers.get(bundleJar);
             if (wrapper == null) {
                 AbstractImporterFactory importFactory = importerModules.get(bundleJar);
                 wrapper = new ImporterWrapper(importFactory);
@@ -199,11 +175,7 @@ public class ImportProcessor implements ImportDataProcessor {
                 if (name == null || name.trim().isEmpty()) {
                     throw new RuntimeException("Importer must implement and return a valid unique name.");
                 }
-                if (!m_bundles.isEmpty()) {
-                    StringBuilder debugMsg = new StringBuilder("HH: bundles: " + m_bundles.keySet().toString());
-                    m_logger.info(debugMsg.toString());
-                }
-                m_bundles.put(bundleJar, wrapper);
+                m_importers.put(bundleJar, wrapper);
             }
             wrapper.configure(properties, formatterBuilder);
         } catch(Throwable t) {

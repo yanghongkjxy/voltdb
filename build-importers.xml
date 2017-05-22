@@ -94,8 +94,11 @@
             <include name="org/voltdb/importclient/ImportBaseException.class"/>
             <zipgroupfileset dir="${base.dir}/third_party/java/jars" includes="amazon-kinesis-client-1.6.2.jar" />
             <zipgroupfileset dir="${base.dir}/third_party/java/jars" includes="aws-java-sdk-1.10.72.jar" />
-            <!--zipgroupfileset dir="${base.dir}/third_party/java/jars" includes="amazon-kinesis-client-1.7.5.jar" />
-            <zipgroupfileset dir="${base.dir}/third_party/java/jars" includes="aws-java-sdk-1.10.72.jar" /-->
+            <!--zipgroupfileset dir="${base.dir}/third_party/java/jars/aws" includes="amazon-kinesis-client-1.6.1.jar" />
+            <zipgroupfileset dir="${base.dir}/third_party/java/jars/aws" includes="aws-java-sdk-cloudwatch-1.10.20.jar" />
+            <zipgroupfileset dir="${base.dir}/third_party/java/jars/aws" includes="aws-java-sdk-kinesis-1.10.20.jar" />
+            <zipgroupfileset dir="${base.dir}/third_party/java/jars/aws" includes="aws-java-sdk-core-1.10.20.jar" />
+            <zipgroupfileset dir="${base.dir}/third_party/java/jars/aws" includes="aws-java-sdk-dynamodb-1.10.20.jar" /-->
             <zipgroupfileset dir="${base.dir}/third_party/java/jars" includes="jackson-dataformat-cbor-2.5.3.jar" />
         	<zipgroupfileset dir="${base.dir}/third_party/java/jars" includes="jackson-databind-2.5.3.jar" />
         	<zipgroupfileset dir="${base.dir}/third_party/java/jars" includes="jackson-core-2.5.3.jar" />

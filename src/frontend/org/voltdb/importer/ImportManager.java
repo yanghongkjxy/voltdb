@@ -19,9 +19,7 @@ package org.voltdb.importer;
 
 import java.io.IOException;
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
@@ -71,7 +69,7 @@ public class ImportManager implements ChannelChangeCallback {
     // Maintains the record of the importer bundles that have been loaded into the memory based on importer config.
     // These loaded loaded bundles remains in memory. ready for use and don't get loaded/unloaded
     private Map<String, AbstractImporterFactory> m_loadedBundles = new HashMap<String, AbstractImporterFactory>();
-    private Map<String, AbstractImporterFactory> m_bundlesByType = new HashMap<String, AbstractImporterFactory>();
+    private Map<String, AbstractImporterFactory> m_importersByType = new HashMap<String, AbstractImporterFactory>();
     // maintains mapping of active importer config to the bundle bundle path used for communicating import processor
     // about the jars to use
     private Map<String, ImportConfiguration> m_configsForProcessor= new HashMap<String, ImportConfiguration>();
@@ -138,7 +136,7 @@ public class ImportManager implements ChannelChangeCallback {
             final String clusterTag = m_distributer.getClusterTag();
 
             ImportDataProcessor newProcessor = new ImportProcessor(
-                    myHostId, m_distributer, m_moduleManager, m_statsCollector, clusterTag);
+                    myHostId, m_distributer, m_statsCollector, clusterTag);
             m_processorConfig = CatalogUtil.getImportProcessorConfig(catalogContext.getDeployment().getImport());
             m_formatterFactories.clear();
 
@@ -177,7 +175,6 @@ public class ImportManager implements ChannelChangeCallback {
      * @param catalogContext
      */
     private void discoverConfigsAndLoadBundles(CatalogContext catalogContext) {
-        List<String> configuredImporters = new ArrayList<String>();
         m_configsForProcessor.clear();
         for (String configName : m_processorConfig.keySet()) {
             ImportConfiguration importConfig = m_processorConfig.get(configName);
@@ -198,13 +195,14 @@ public class ImportManager implements ChannelChangeCallback {
                         " is missing will disable this importer until the procedure becomes available.");
                 continue;
             }
-            configuredImporters.add(configName);
+
             if (loadImporterBundle(properties)) {
                 m_configsForProcessor.put(configName, importConfig);
             }
         }
-        importLog.info("Import Processor is configured. Configured Importers(" + configuredImporters.size()
-            + ": " + configuredImporters);
+        if (!m_configsForProcessor.isEmpty()) {
+            importLog.info("Loaded importer modules: " + m_loadedBundles.keySet() +", types: " + m_importersByType.keySet());
+        }
     }
 
 
@@ -244,16 +242,15 @@ public class ImportManager implements ChannelChangeCallback {
                 if (importerType == null || importerType.trim().isEmpty()) {
                     throw new RuntimeException("Importer must implement and return a valid unique name.");
                 }
-                Preconditions.checkState(!m_bundlesByType.containsKey(importerType),
+                Preconditions.checkState(!m_importersByType.containsKey(importerType),
                         "Importer must implement and return a valid unique name: " + importerType);
-                m_bundlesByType.put(importerType, importerFactory);
+                m_importersByType.put(importerType, importerFactory);
                 m_loadedBundles.put(bundleJar, importerFactory);
             }
         } catch(Throwable t) {
             importLog.error("Failed to configure import handler for " + bundleJar, t);
             Throwables.propagate(t);
         }
-        importLog.info("List of loaded jar modules: " + m_loadedBundles.keySet() +", importer types: " + m_bundlesByType.keySet());
         return true;
 }
 

@@ -74,8 +74,6 @@ public class KinesisStreamImporter extends AbstractImporter {
                 .withMetricsLevel(MetricsLevel.NONE)
                 .withTaskBackoffTimeMillis(m_config.getTaskBackoffTimeMillis()).withKinesisClientConfig(
                         KinesisStreamImporterConfig.getClientConfigWithUserAgent(m_config.getAppName()));
-
-
         m_worker = new Worker.Builder().recordProcessorFactory(new RecordProcessorFactory()).config(kclConfig)
                 .build();
     }
@@ -108,9 +106,9 @@ public class KinesisStreamImporter extends AbstractImporter {
 
     @Override
     public void stop() {
-        info(null, "HH: shutdown received " + getTaskThreadName());
         m_worker.shutdown();
     }
+
 
     @Override
     public String getName() {
@@ -137,7 +135,7 @@ public class KinesisStreamImporter extends AbstractImporter {
 
     private class StreamConsumer implements IRecordProcessor {
 
-        private String m_shardId;
+        private String m_shardId = new String("");
         private Formatter m_formatter;
         Gap m_gapTracker = new Gap(Integer.getInteger("KINESIS_IMPORT_GAP_LEAD", 32768));
         private BigInteger m_lastFetchCommittedSequenceNumber = BigInteger.ZERO;
@@ -213,6 +211,11 @@ public class KinesisStreamImporter extends AbstractImporter {
         @Override
         public void shutdown(ShutdownInput shutDownInput) {
 
+            if (isDebugEnabled()) {
+                debug(null, "shard ID: " + (m_shardId.trim().isEmpty()? "unknown" : m_shardId)
+                        + "shutdown reason: " + shutDownInput.getShutdownReason().name());
+            }
+
             if (ShutdownReason.TERMINATE.equals(shutDownInput.getShutdownReason())) {
                 //The shard may be split or merged. checkpoint one last time
                 commitCheckPoint(shutDownInput.getCheckpointer());
@@ -226,6 +229,9 @@ public class KinesisStreamImporter extends AbstractImporter {
         private void commitCheckPoint(IRecordProcessorCheckpointer checkpointer) {
 
             int retries = 1;
+            if (!shouldRun()) {
+                info(null, "will skip commitCheckPoint ..... ");
+            }
             while (retries < 4 && shouldRun()) {
 
                 final BigInteger safe = m_gapTracker.getSafeCommitPoint();

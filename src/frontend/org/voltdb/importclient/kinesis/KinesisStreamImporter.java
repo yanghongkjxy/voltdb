@@ -40,6 +40,7 @@ import com.amazonaws.services.kinesis.clientlibrary.types.InitializationInput;
 import com.amazonaws.services.kinesis.clientlibrary.types.ProcessRecordsInput;
 import com.amazonaws.services.kinesis.clientlibrary.types.ShutdownInput;
 import com.amazonaws.services.kinesis.clientlibrary.types.ShutdownReason;
+import com.amazonaws.services.kinesis.metrics.interfaces.MetricsLevel;
 import com.amazonaws.services.kinesis.model.Record;
 
 import org.voltcore.logging.Level;
@@ -64,6 +65,19 @@ public class KinesisStreamImporter extends AbstractImporter {
     public KinesisStreamImporter(KinesisStreamImporterConfig config) {
         m_config = config;
         m_workerId = UUID.randomUUID().toString();
+        KinesisClientLibConfiguration kclConfig = new KinesisClientLibConfiguration(m_config.getAppName(),
+                m_config.getStreamName(), credentials(), m_workerId);
+
+        kclConfig.withRegionName(m_config.getRegion()).withMaxRecords((int) m_config.getMaxReadBatchSize())
+                .withInitialPositionInStream(InitialPositionInStream.TRIM_HORIZON)
+                .withIdleTimeBetweenReadsInMillis(m_config.getIdleTimeBetweenReads())
+                .withMetricsLevel(MetricsLevel.NONE)
+                .withTaskBackoffTimeMillis(m_config.getTaskBackoffTimeMillis()).withKinesisClientConfig(
+                        KinesisStreamImporterConfig.getClientConfigWithUserAgent(m_config.getAppName()));
+
+
+        m_worker = new Worker.Builder().recordProcessorFactory(new RecordProcessorFactory()).config(kclConfig)
+                .build();
     }
 
     @Override
@@ -80,36 +94,11 @@ public class KinesisStreamImporter extends AbstractImporter {
     public void accept() {
         info(null, "Starting data stream fetcher for " + m_config.getResourceID().toString());
         try {
-            KinesisClientLibConfiguration kclConfig = new KinesisClientLibConfiguration(m_config.getAppName(),
-                    m_config.getStreamName(), credentials(), m_workerId);
-
-            kclConfig.withRegionName(m_config.getRegion()).withMaxRecords((int) m_config.getMaxReadBatchSize())
-                    .withInitialPositionInStream(InitialPositionInStream.TRIM_HORIZON)
-                    .withIdleTimeBetweenReadsInMillis(m_config.getIdleTimeBetweenReads())
-                    .withMetricsLevel("NONE")
-                    .withTaskBackoffTimeMillis(m_config.getTaskBackoffTimeMillis()).withKinesisClientConfig(
-                            KinesisStreamImporterConfig.getClientConfigWithUserAgent(m_config.getAppName()));
-
-
-            m_worker = new Worker.Builder().recordProcessorFactory(new RecordProcessorFactory()).config(kclConfig)
-                    .build();
-
-            if (!shouldRun()) {
-                info (null, "HH: Kinesis stopping, so will not start");
-                m_worker.shutdown();
-                return;
-            }
             m_worker.run();
-
         } catch (RuntimeException e) {
-
             //aws silences all the exceptions but IllegalArgumentException, throw RuntimeException.
             rateLimitedLog(Level.ERROR, e, "Error in Kinesis stream importer %s", m_config.getResourceID());
-            if (null != m_worker) {
-                //m_worker.shutdown();
-                shutDowntWorker();
-            }
-
+            m_worker.shutdown();
         }
 
         info(null, "Data stream fetcher stopped for %s. Callback Rcvd: %d. Submitted: %d",
@@ -119,20 +108,7 @@ public class KinesisStreamImporter extends AbstractImporter {
 
     @Override
     public void stop() {
-
         info(null, "HH: shutdown received " + getTaskThreadName());
-        shutDowntWorker();
-    }
-
-    private void shutDowntWorker() {
-
-        if (m_worker == null) {
-            info(null, "HH: worker not initialized yet, shutdown not invoked" + m_workerId);
-            return ;
-        }
-        info(null, "shutdown seen " + m_workerId);
-//        ExecutorService shutdownExecutor = CoreUtils.getSingleThreadExecutor(m_workerId, CoreUtils.MEDIUM_STACK_SIZE);
-//        return shutdownExecutor.submit(() -> m_worker.shutdown());
         m_worker.shutdown();
     }
 

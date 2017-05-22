@@ -52,7 +52,7 @@ public abstract class AbstractImporter
 
     private final VoltLogger m_logger;
     private ImporterServerAdapter m_importServerAdapter;
-    private volatile boolean m_stopping = false;
+    private volatile boolean m_stopping;
     private final Function<Integer, Boolean> m_backPressurePredicate = (x) -> shouldRun();
 
     protected AbstractImporter() {

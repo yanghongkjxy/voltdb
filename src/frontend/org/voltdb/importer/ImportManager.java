@@ -68,6 +68,14 @@ public class ImportManager implements ChannelChangeCallback {
     private final ImporterStatsCollector m_statsCollector;
     private final ModuleManager m_moduleManager;
 
+    // Maintains the record of the importer bundles that have been loaded into the memory based on importer config.
+    // These loaded loaded bundles remains in memory. ready for use and don't get loaded/unloaded
+    private Map<String, AbstractImporterFactory> m_loadedBundles = new HashMap<String, AbstractImporterFactory>();
+    private Map<String, AbstractImporterFactory> m_bundlesByType = new HashMap<String, AbstractImporterFactory>();
+    // maintains mapping of active importer config to the bundle bundle path used for communicating import processor
+    // about the jars to use
+    private Map<String, ImportConfiguration> m_configsForProcessor= new HashMap<String, ImportConfiguration>();
+
     /**
      * Get the global instance of the ImportManager.
      * @return The global single instance of the ImportManager.
@@ -114,12 +122,6 @@ public class ImportManager implements ChannelChangeCallback {
         em.create(myHostId, catalogContext);
     }
 
-    private Map<String, AbstractImporterFactory> m_loadedBundles = new HashMap<String, AbstractImporterFactory>();
-    private Map<String, AbstractImporterFactory> m_bundlesByType = new HashMap<String, AbstractImporterFactory>();
-//    private Map<String, AbstractImporterFactory> m_importerFactories = new HashMap<String, AbstractImporterFactory>();
-    private Map<String, ImportConfiguration> m_configsForProcessor= new HashMap<String, ImportConfiguration>();
-
-
     /**
      * This creates a import connector from configuration provided.
      * @param myHostId
@@ -159,8 +161,6 @@ public class ImportManager implements ChannelChangeCallback {
                 }
             }
 
-//            newProcessor.setProcessorConfig(catalogContext, m_processorConfig);
-//            m_processor.set(newProcessor);
             discoverConfigsAndLoadBundles(catalogContext);
             if (!m_configsForProcessor.isEmpty()) {
                 newProcessor.setProcessorConfig(m_configsForProcessor, m_loadedBundles);
@@ -171,8 +171,12 @@ public class ImportManager implements ChannelChangeCallback {
         }
     }
 
+    /**
+     * Parses importer configs and loads the bundle needed for importer into memory. Updates
+     * mapping of active importer bundle to the bundle jar needed by the impoter
+     * @param catalogContext
+     */
     private void discoverConfigsAndLoadBundles(CatalogContext catalogContext) {
-
         List<String> configuredImporters = new ArrayList<String>();
         m_configsForProcessor.clear();
         for (String configName : m_processorConfig.keySet()) {
@@ -201,14 +205,13 @@ public class ImportManager implements ChannelChangeCallback {
         }
         importLog.info("Import Processor is configured. Configured Importers(" + configuredImporters.size()
             + ": " + configuredImporters);
-//        return workToDo;
     }
 
 
 
     /**
-     * Functions checks if the importer factory exists for the given importer modules specified in the
-     * properties. If not, creates ones. Than populates the bundle entry in the cache listed of the bundles     *
+     * Checks if the module for importer has been loaded in the memory. If bundle doesn't exists, it loades one and
+     * updates the mapping records of the bundles.
      *
      * @param moduleProperties
      */
@@ -241,19 +244,11 @@ public class ImportManager implements ChannelChangeCallback {
                 if (importerType == null || importerType.trim().isEmpty()) {
                     throw new RuntimeException("Importer must implement and return a valid unique name.");
                 }
-                Preconditions.checkState(!m_bundlesByType.containsKey(importerType), "Importer must implement and return a valid unique name: " + importerType);
-//                if (!m_bundlesByType.isEmpty()) {
-//                    StringBuilder debugMsg = new StringBuilder("HH: bundles by name: " + m_bundlesByType.keySet().toString());
-//                    importLog.info(debugMsg.toString());
-//                }
-//                if (!m_loadedBundles.isEmpty()) {
-//                    StringBuilder debugMsg = new StringBuilder("HH: bundles: " + m_loadedBundles.keySet().toString());
-//                    importLog.info(debugMsg.toString());
-//                }
+                Preconditions.checkState(!m_bundlesByType.containsKey(importerType),
+                        "Importer must implement and return a valid unique name: " + importerType);
                 m_bundlesByType.put(importerType, importerFactory);
                 m_loadedBundles.put(bundleJar, importerFactory);
             }
-//            m_importerFactories.put(bundleJar, importerFactory);
         } catch(Throwable t) {
             importLog.error("Failed to configure import handler for " + bundleJar, t);
             Throwables.propagate(t);

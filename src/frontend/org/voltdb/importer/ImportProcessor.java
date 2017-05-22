@@ -42,7 +42,6 @@ public class ImportProcessor implements ImportDataProcessor {
 
     private static final VoltLogger m_logger = new VoltLogger("IMPORT");
     private final Map<String, ImporterWrapper> m_bundles = new HashMap<String, ImporterWrapper>();
-//    private final Map<String, ImporterWrapper> m_bundlesByName = new HashMap<String, ImporterWrapper>();
     private final ModuleManager m_moduleManager;
     private final ChannelDistributer m_distributer;
     private final ExecutorService m_es = CoreUtils.getSingleThreadExecutor("ImportProcessor");
@@ -132,16 +131,6 @@ public class ImportProcessor implements ImportDataProcessor {
                 }
             }
         });
-        // wait for start
-//        try {
-//            if(task.get() == null) {
-//                m_logger.info("Importer started ");
-//            }
-//            else {
-//                m_logger.info("Importer starting, blocking did not help");
-//            }
-//        } catch (Exception e) {
-//        }
     }
 
     @Override
@@ -181,22 +170,10 @@ public class ImportProcessor implements ImportDataProcessor {
         } catch (InterruptedException | ExecutionException ex) {
             m_logger.error("Failed to stop import processor.", ex);
         }
-        StringBuilder msg = new StringBuilder("HH: Importerprocess shutdown wait ");
+        StringBuilder msg = new StringBuilder("HH: Importerprocess shutdown ");
         try {
             m_es.shutdown();
             m_es.awaitTermination(365, TimeUnit.DAYS);
-//            if (m_es.awaitTermination(30, TimeUnit.SECONDS)) {
-//                msg.append("- Shutdown completed");
-//            }
-//            else {
-//                msg.append(" - Timedout waiting for shutdown to complete");
-//                m_es.shutdownNow();
-//                if (!m_es.awaitTermination(30, TimeUnit.SECONDS)) {
-//                    msg.append(". Force shutdown suceeeded");
-//                } else {
-//                    msg.append(". Force shutdown suceeeded");
-//                }
-//            }
         } catch (InterruptedException ex) {
             m_logger.error("Failed to stop import processor executor.", ex);
         } finally {
@@ -204,7 +181,7 @@ public class ImportProcessor implements ImportDataProcessor {
         }
     }
 
-    private void addProcessorConfig(ImportConfiguration config, Map<String, AbstractImporterFactory> bundles) {
+    private void addProcessorConfig(ImportConfiguration config, Map<String, AbstractImporterFactory> importerModules) {
         Properties properties = config.getmoduleProperties();
 
         String module = properties.getProperty(ImportDataProcessor.IMPORT_MODULE);
@@ -216,7 +193,7 @@ public class ImportProcessor implements ImportDataProcessor {
 
             ImporterWrapper wrapper = m_bundles.get(bundleJar);
             if (wrapper == null) {
-                AbstractImporterFactory importFactory = bundles.get(bundleJar);
+                AbstractImporterFactory importFactory = importerModules.get(bundleJar);
                 wrapper = new ImporterWrapper(importFactory);
                 String name = wrapper.getImporterType();
                 if (name == null || name.trim().isEmpty()) {
@@ -237,10 +214,10 @@ public class ImportProcessor implements ImportDataProcessor {
 
     @Override
     public void setProcessorConfig(Map<String, ImportConfiguration> config,
-            final Map<String, AbstractImporterFactory> bundles) {
+            final Map<String, AbstractImporterFactory> importerModules) {
         for (String configName : config.keySet()) {
             ImportConfiguration importConfig = config.get(configName);
-            addProcessorConfig(importConfig, bundles);
+            addProcessorConfig(importConfig, importerModules);
         }
     }
 

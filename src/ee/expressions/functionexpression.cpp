@@ -86,6 +86,10 @@ template<> inline NValue NValue::call<FUNC_VOLT_SQL_ERROR>(const std::vector<NVa
     throw SQLException(sqlstatecode, msg_format_buffer);
 }
 
+NValue NValue::callUserDefinedFunction(int functionId, const std::vector<NValue>& arguments) {
+    return NValue::getNullValue(VALUE_TYPE_BIGINT);
+}
+
 namespace functionexpression {
 
 /*
@@ -190,6 +194,53 @@ private:
     const std::vector<AbstractExpression *>& m_args;
 };
 
+/*
+ * User-defined scalar function.
+ */
+class UserDefinedFunctionExpression : public AbstractExpression {
+public:
+    UserDefinedFunctionExpression(int functionId, const std::vector<AbstractExpression *>& args)
+        : AbstractExpression(EXPRESSION_TYPE_FUNCTION),
+          m_functionId(functionId),
+          m_args(args) {}
+
+    virtual ~UserDefinedFunctionExpression() {
+        size_t i = m_args.size();
+        while (i--) {
+            delete m_args[i];
+        }
+        delete &m_args;
+    }
+
+    virtual bool hasParameter() const {
+        for (size_t i = 0; i < m_args.size(); i++) {
+            assert(m_args[i]);
+            if (m_args[i]->hasParameter()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    NValue eval(const TableTuple *tuple1, const TableTuple *tuple2) const {
+        std::vector<NValue> nValue(m_args.size());
+        for (int i = 0; i < m_args.size(); ++i) {
+            nValue[i] = m_args[i]->eval(tuple1, tuple2);
+        }
+        return NValue::callUserDefinedFunction(m_functionId, nValue);
+    }
+
+    std::string debugInfo(const std::string &spacer) const {
+        std::stringstream buffer;
+        buffer << spacer << "UserDefinedFunctionExpression " << std::endl;
+        return (buffer.str());
+    }
+
+private:
+    int m_functionId;
+    const std::vector<AbstractExpression *>& m_args;
+};
+
 }
 
 using namespace functionexpression;
@@ -197,7 +248,7 @@ using namespace functionexpression;
 AbstractExpression*
 ExpressionUtil::functionFactory(int functionId, const std::vector<AbstractExpression*>* arguments) {
     if (IS_USER_DEFINED_ID(functionId)) {
-        return new ConstantValueExpression(NValue::getNullValue(VALUE_TYPE_BIGINT));
+        return new UserDefinedFunctionExpression(functionId, *arguments);
     }
     AbstractExpression* ret = 0;
     assert(arguments);

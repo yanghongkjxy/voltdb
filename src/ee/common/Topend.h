@@ -83,6 +83,9 @@ class Topend {
     /** Calls the java method in org.voltdb.utils.Encoder */
     virtual std::string decodeBase64AndDecompress(const std::string& buffer) = 0;
 
+    // Call into Java top end to execute a user-defined function
+    virtual int callJavaUserDefinedFunction(int32_t functionId) = 0;
+
     virtual ~Topend()
     {
     }
@@ -121,6 +124,8 @@ public:
     void fallbackToEEAllocatedBuffer(char *buffer, size_t length);
 
     std::string decodeBase64AndDecompress(const std::string& buffer);
+
+    int callJavaUserDefinedFunction(int32_t functionId);
 
     std::queue<int32_t> partitionIds;
     std::queue<std::string> signatures;

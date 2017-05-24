@@ -452,8 +452,6 @@ class NValue {
     template <int F> // template for SQL functions of multiple NValues
     static NValue call(const std::vector<NValue>& arguments);
 
-    static NValue callUserDefinedFunction(int functionId, const std::vector<NValue>& arguments);
-
     /// Iterates over UTF8 strings one character "code point" at a time, being careful not to walk off the end.
     class UTF8Iterator {
     public:

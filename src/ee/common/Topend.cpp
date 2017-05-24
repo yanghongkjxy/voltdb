@@ -146,4 +146,8 @@ namespace voltdb {
         return "";
     }
 
+    int DummyTopend::callJavaUserDefinedFunction(int32_t functionId) {
+        return 0;
+    }
+
 }

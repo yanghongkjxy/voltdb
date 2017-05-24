@@ -86,10 +86,6 @@ template<> inline NValue NValue::call<FUNC_VOLT_SQL_ERROR>(const std::vector<NVa
     throw SQLException(sqlstatecode, msg_format_buffer);
 }
 
-NValue NValue::callUserDefinedFunction(int functionId, const std::vector<NValue>& arguments) {
-    return NValue::getNullValue(VALUE_TYPE_BIGINT);
-}
-
 namespace functionexpression {
 
 /*
@@ -202,7 +198,8 @@ public:
     UserDefinedFunctionExpression(int functionId, const std::vector<AbstractExpression *>& args)
         : AbstractExpression(EXPRESSION_TYPE_FUNCTION),
           m_functionId(functionId),
-          m_args(args) {}
+          m_args(args),
+          m_engine(ExecutorContext::getEngine()) {}
 
     virtual ~UserDefinedFunctionExpression() {
         size_t i = m_args.size();
@@ -227,7 +224,7 @@ public:
         for (int i = 0; i < m_args.size(); ++i) {
             nValue[i] = m_args[i]->eval(tuple1, tuple2);
         }
-        return NValue::callUserDefinedFunction(m_functionId, nValue);
+        return m_engine->callUserDefinedFunction(m_functionId, nValue);
     }
 
     std::string debugInfo(const std::string &spacer) const {
@@ -239,6 +236,7 @@ public:
 private:
     int m_functionId;
     const std::vector<AbstractExpression *>& m_args;
+    VoltDBEngine* m_engine;
 };
 
 }

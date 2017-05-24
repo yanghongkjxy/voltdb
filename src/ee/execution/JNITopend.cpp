@@ -367,6 +367,10 @@ std::string JNITopend::decodeBase64AndDecompress(const std::string& base64Str) {
     return jbyteArrayToStdString(m_jniEnv, jni_frame, jbuf);
 }
 
+int JNITopend::callJavaUserDefinedFunction(int32_t functionId) {
+    return 0;
+}
+
 void JNITopend::crashVoltDB(FatalException e) {
     //Enough references for the reason string, traces array, and traces strings
     JNILocalFrameBarrier jni_frame =

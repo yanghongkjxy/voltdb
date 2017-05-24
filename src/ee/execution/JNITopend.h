@@ -64,6 +64,8 @@ public:
 
     std::string decodeBase64AndDecompress(const std::string& buffer);
 
+    int callJavaUserDefinedFunction(int32_t functionId);
+
 private:
     JNIEnv *m_jniEnv;
 

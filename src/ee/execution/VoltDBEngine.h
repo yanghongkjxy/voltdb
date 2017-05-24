@@ -211,6 +211,11 @@ class __attribute__((visibility("default"))) VoltDBEngine {
         UniqueTempTableResult executePlanFragment(ExecutorVector* executorVector,
                                                   int64_t* tuplesModified = NULL);
 
+        // Call user-defined function
+        NValue callUserDefinedFunction(int functionId, const std::vector<NValue>& arguments) {
+            return NValue::getNullValue(VALUE_TYPE_BIGINT);
+        }
+
         // Created to transition existing unit tests to context abstraction.
         // If using this somewhere new, consider if you're being lazy.
         void updateExecutorContextUndoQuantumForTest();

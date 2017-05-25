@@ -925,9 +925,66 @@ public class PlanAssembler {
         }
 
         if (current.getChildCount() == 1) {
-            // This is still a coordinator node
-            return removeCoordinatorSendReceivePairRecursive(root,
-                    current.getChild(0));
+            // This is still a coordinator node.
+            // If this node is a projection
+            // node and its child is the
+            // R/S pair, we would have this graph:
+            //                this--+
+            //                      |
+            //                      V
+            //    OUTER_NODE -> PROJECTION -> RECEIVE -> SEND -> INNER_NODE
+            // When we remove the R/S pair, we would
+            // get this graph:
+            //                this--+
+            //                      |
+            //                      V
+            //    OUTER_NODE -> PROJECTION -> INNER_NODE
+            // In this case, the projection may not be
+            // necessary.  The projection node may be
+            // the identity.  This has two deleterious
+            // effects.  FIrst, we make an unnecessary
+            // copy of the temp table output from the
+            // INNER_NODE.  Second, we want to make the
+            // OUTER_NODE be inline in the INNER_NODE.
+            // The OUTER_NODE may be an INSERT node, for
+            // example.  So we want to check for this
+            // case and delete the PROJECTION node if
+            // it's unnecessary.
+            //
+            // One would think this is a micro-optimization.
+            // Unfortunately, the micro-optimization pass
+            // runs after this function is called.
+            //
+            // One would also think this could be avoided by
+            // inspecting the PROJECTION node when it's
+            // created.  But this turns out to not be the
+            // place.  We create the plan, then calculate the
+            // output schemas and then land here.  So we cannot
+            // really discover this until now.
+            //
+            AbstractPlanNode answer
+                = removeCoordinatorSendReceivePairRecursive(root, current.getChild(0));
+            // Note that current could be the one we
+            // just removed from the graph in the recursive
+            // call.  But it won't be garbage collected yet,
+            // and its plan node type will be RECEIVE or SEND.
+            // So it can't be the PROJECTION node we are looking
+            // for.  So this should be safe.
+            if (current.getPlanNodeType() == PlanNodeType.PROJECTION) {
+                ProjectionPlanNode ppn = (ProjectionPlanNode)current;
+                NodeSchema childSchema = ppn.getChild(0).getOutputSchema();
+                if (ppn.isIdentity(childSchema)) {
+                    // We don't need this node.  So remove it.
+                    AbstractPlanNode parent = (current.getParentCount() > 0) ? current.getParent(0) : null;
+                    AbstractPlanNode child = current.getChild(0);
+                    current.removeFromGraph();
+                    if (parent != null) {
+                        parent.addAndLinkChild(answer);
+                    } else {
+                        root = child;
+                    }
+                }
+            }
         }
 
         // We have hit a multi-child plan node -- a nestloop join or a union.

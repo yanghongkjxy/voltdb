@@ -79,12 +79,8 @@ public class TestPlansInsertIntoSelect extends PlannerTestCase {
                      PlanNodeType.RECEIVE,
                      PlanNodeType.INVALID,
                      PlanNodeType.SEND,
-                     PlanNodeType.INSERT,
-                     // This PROJECTION node keeps the INSERT
-                     // node from being inlined.  See ENG-12434.
-                     PlanNodeType.PROJECTION,
                      new PlanWithInlineNodes(PlanNodeType.SEQSCAN,
-                                             PlanNodeType.PROJECTION));
+                                             PlanNodeType.INSERT));
         validatePlan("INSERT INTO P2 SELECT * from P1;",
                      2,
                      PlanNodeType.SEND,
@@ -92,10 +88,8 @@ public class TestPlansInsertIntoSelect extends PlannerTestCase {
                      PlanNodeType.RECEIVE,
                      PlanNodeType.INVALID,
                      PlanNodeType.SEND,
-                     PlanNodeType.INSERT,
-                     PlanNodeType.PROJECTION,
                      new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
-                                             PlanNodeType.PROJECTION));
+                                             PlanNodeType.INSERT));
     }
 
     public void testInlineInsertReplicatedToPartitioned() {

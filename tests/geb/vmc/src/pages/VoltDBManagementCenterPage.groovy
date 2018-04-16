@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -52,12 +52,14 @@ class VoltDBManagementCenterPage extends Page {
         sqlQueryTab                         { navTabs.find('#navSqlQuery') }
         drTab                               { $('#navDR') }
         importerTab                         { $('#navImporter') }
+        analysisTab                         { $('#navAnalysis') }
         dbMonitorLink (to: DbMonitorPage)   { dbMonitorTab.find('a') }
         adminLink (to: AdminPage)           { adminTab.find('a') }
         schemaLink (to: SchemaPage)         { schemaTab.find('a') }
         sqlQueryLink (to: SqlQueryPage)     { sqlQueryTab.find('a') }
         drLink (to: DrPage)                 { $('#navDR > a') }
         importerLink (to: ImporterPage)     { $('#navImporter > a') }
+        analysisLink (to: AnalysisPage)     { analysisTab.find('a') }
         loginDialog (required: false)       { $('#loginBox') }
         usernameInput (required: false)     { loginDialog.find('input#username') }
         passwordInput (required: false)     { loginDialog.find('input#password') }
@@ -324,6 +326,19 @@ class VoltDBManagementCenterPage extends Page {
     }
 
     /**
+     * Returns true if the current page is a AnalysisPage (i.e., the "Analysis"
+     * tab of the VoltDB Management Center page is currently open).
+     * @return true if a AnalysisPage is currently open.
+     */
+    def boolean isAnalysisPageOpen() {
+        if (analysisTab.attr('class') == 'active') {
+            return true
+        } else {
+            return false
+        }
+    }
+
+    /**
      * Clicks the "DB Monitor" link, opening the "DB Monitor" page (or tab);
      * if the "DB Monitor" page is already open, no action is taken.
      */
@@ -381,6 +396,16 @@ class VoltDBManagementCenterPage extends Page {
     def void openImporterPage() {
         if (!isImporterPageOpen()) {
             importerLink.click()
+        }
+    }
+
+    /**
+     * Clicks the "Analysis" link, opening the "Analysis" page (or tab);
+     * if the "Analysis" page is already open, no action is taken.
+     */
+    def void openAnalysisPage() {
+        if (!isAnalysisPageOpen()) {
+            analysisLink.click()
         }
     }
 

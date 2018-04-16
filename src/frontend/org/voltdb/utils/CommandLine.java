@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -99,6 +99,7 @@ public class CommandLine extends VoltDB.Configuration
         cl.m_buildStringOverrideForTest = m_buildStringOverrideForTest;
         cl.m_forceVoltdbCreate = m_forceVoltdbCreate;
         cl.m_userSchema = m_userSchema;
+        cl.m_stagedClassesPath = m_stagedClassesPath;
 
         // second, copy the derived class fields
         cl.includeTestOpts = includeTestOpts;
@@ -127,6 +128,7 @@ public class CommandLine extends VoltDB.Configuration
         cl.m_newCli = m_newCli;
         cl.m_sslEnable = m_sslEnable;
         cl.m_sslExternal = m_sslExternal;
+        cl.m_sslInternal = m_sslInternal;
         cl.m_placementGroup = m_placementGroup;
         // deep copy the property map if it exists
         if (javaProperties != null) {
@@ -168,6 +170,10 @@ public class CommandLine extends VoltDB.Configuration
 
     public int adminPort() {
         return m_adminPort;
+    }
+
+    public int httpPort() {
+        return m_httpPort;
     }
 
     public CommandLine internalPort(int internalPort) {
@@ -304,6 +310,10 @@ public class CommandLine extends VoltDB.Configuration
         return this;
     }
 
+    public String voltRoot() {
+        return volt_root;
+    }
+
     String rmi_host_name = "";
     public CommandLine rmiHostName(String rmiHostName) {
         rmi_host_name = rmiHostName;
@@ -413,10 +423,6 @@ public class CommandLine extends VoltDB.Configuration
     public CommandLine voltdbRoot(File voltdbRoot) {
         m_voltdbRoot = voltdbRoot;
         return this;
-    }
-
-    public File voltdbRoot() {
-        return m_voltdbRoot;
     }
 
     String javaExecutable = "java";
@@ -601,9 +607,9 @@ public class CommandLine extends VoltDB.Configuration
 
         // add default keystore, truststore
         if (m_sslEnable) {
-            cmdline.add("-Djavax.net.ssl.keyStore=keystore");
+            cmdline.add("-Djavax.net.ssl.keyStore=tests/frontend/org/voltdb/keystore");
             cmdline.add("-Djavax.net.ssl.keyStorePassword=password");
-            cmdline.add("-Djavax.net.ssl.trustStore=keystore");
+            cmdline.add("-Djavax.net.ssl.trustStore=tests/frontend/org/voltdb/keystore");
             cmdline.add("-Djavax.net.ssl.trustStorePassword=password");
         }
 
@@ -654,6 +660,10 @@ public class CommandLine extends VoltDB.Configuration
 
         if (m_sslExternal) {
             cmdline.add("externalSSL");
+        }
+
+        if (m_sslInternal) {
+            cmdline.add("internalSSL");
         }
 
         cmdline.add("host");

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -484,8 +484,6 @@ public class TestIndexReverseScan extends PlannerTestCase {
         assertTrue(pn instanceof SendPlanNode);
         pn = pn.getChild(0);
         if (needOrderby) {
-            assertTrue(pn instanceof ProjectionPlanNode);
-            pn = pn.getChild(0);
             assertTrue(pn instanceof OrderByPlanNode);
             pn = pn.getChild(0);
         }
@@ -529,8 +527,6 @@ public class TestIndexReverseScan extends PlannerTestCase {
         pn = pn.getChild(0);
 
         if (needOrderby) {
-            assertTrue(pn instanceof ProjectionPlanNode);
-            pn = pn.getChild(0);
             assertTrue(pn instanceof OrderByPlanNode);
             pn = pn.getChild(0);
         }

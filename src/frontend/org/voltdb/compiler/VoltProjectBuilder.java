@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -40,14 +40,12 @@ import javax.xml.bind.JAXBException;
 import javax.xml.bind.Marshaller;
 
 import org.voltdb.BackendTarget;
-import org.voltdb.Consistency;
-import org.voltdb.ProcInfoData;
+import org.voltdb.ProcedurePartitionData;
 import org.voltdb.catalog.Catalog;
 import org.voltdb.common.Constants;
 import org.voltdb.compiler.deploymentfile.ClusterType;
 import org.voltdb.compiler.deploymentfile.CommandLogType;
 import org.voltdb.compiler.deploymentfile.ConnectionType;
-import org.voltdb.compiler.deploymentfile.ConsistencyType;
 import org.voltdb.compiler.deploymentfile.DeploymentType;
 import org.voltdb.compiler.deploymentfile.DiskLimitType;
 import org.voltdb.compiler.deploymentfile.DrRoleType;
@@ -101,23 +99,32 @@ public class VoltProjectBuilder {
         private final Class<?> cls;
         private final String name;
         private final String sql;
-        private final String partitionInfo;
+        private final ProcedurePartitionData partitionData;
 
-        public ProcedureInfo(final String roles[], final Class<?> cls) {
-            this.roles = roles;
-            this.cls = cls;
-            this.name = cls.getSimpleName();
-            this.sql = null;
-            this.partitionInfo = null;
-            assert(this.name != null);
-        }
-
-        public ProcedureInfo(final Class<?> cls, final String partitionInfo) {
+        public ProcedureInfo(final Class<?> cls) {
             this.roles = new String[0];
             this.cls = cls;
             this.name = cls.getSimpleName();
             this.sql = null;
-            this.partitionInfo = partitionInfo;
+            this.partitionData = null;
+        }
+
+        public ProcedureInfo(final Class<?> cls, final ProcedurePartitionData partitionInfo) {
+            this.roles = new String[0];
+            this.cls = cls;
+            this.name = cls.getSimpleName();
+            this.sql = null;
+            this.partitionData = partitionInfo;
+            assert(this.name != null);
+        }
+
+        public ProcedureInfo(final Class<?> cls, final ProcedurePartitionData partitionInfo,
+                final String roles[]) {
+            this.roles = roles;
+            this.cls = cls;
+            this.name = cls.getSimpleName();
+            this.sql = null;
+            this.partitionData = partitionInfo;
             assert(this.name != null);
         }
 
@@ -125,7 +132,7 @@ public class VoltProjectBuilder {
                 final String roles[],
                 final String name,
                 final String sql,
-                final String partitionInfo) {
+                final ProcedurePartitionData partitionInfo) {
             assert(name != null);
             this.roles = roles;
             this.cls = null;
@@ -136,7 +143,7 @@ public class VoltProjectBuilder {
             else {
                 this.sql = sql + ";";
             }
-            this.partitionInfo = partitionInfo;
+            this.partitionData = partitionInfo;
             assert(this.name != null);
         }
 
@@ -257,6 +264,7 @@ public class VoltProjectBuilder {
     boolean m_jsonApiEnabled = true;
     boolean m_sslEnabled = false;
     boolean m_sslExternal = false;
+    boolean m_sslDR = false;
 
     String m_keystore;
     String m_keystorePassword;
@@ -267,8 +275,6 @@ public class VoltProjectBuilder {
     PrintStream m_compilerDebugPrintStream = null;
     boolean m_securityEnabled = false;
     String m_securityProvider = SecurityProviderString.HASH.value();
-
-    final Map<String, ProcInfoData> m_procInfoOverrides = new HashMap<>();
 
     private String m_snapshotPath = null;
     private int m_snapshotRetain = 0;
@@ -281,8 +287,6 @@ public class VoltProjectBuilder {
     private String m_ppdPrefix = "none";
 
     private Integer m_heartbeatTimeout = null;
-
-    private Consistency.ReadLevel m_consistencyReadLevel = null;
 
     private String m_internalSnapshotPath;
     private String m_commandLogPath;
@@ -309,6 +313,7 @@ public class VoltProjectBuilder {
     private Integer m_elasticThroughput = null;
     private Integer m_elasticDuration = null;
     private Integer m_queryTimeout = null;
+    private Integer m_procedureLogThreshold = null;
     private String m_rssLimit = null;
     private String m_snmpRssLimit = null;
     private Integer m_resourceCheckInterval = null;
@@ -320,11 +325,17 @@ public class VoltProjectBuilder {
     private String m_drMasterHost;
     private Integer m_preferredSource;
     private Boolean m_drConsumerConnectionEnabled = null;
+    private String m_drConsumerSslPropertyFile = null;
     private Boolean m_drProducerEnabled = null;
     private DrRoleType m_drRole = DrRoleType.MASTER;
 
     public VoltProjectBuilder setQueryTimeout(int target) {
         m_queryTimeout = target;
+        return this;
+    }
+
+    public VoltProjectBuilder setProcedureLogThreshold(int target) {
+        m_procedureLogThreshold = target;
         return this;
     }
 
@@ -517,22 +528,41 @@ public class VoltProjectBuilder {
     }
 
     public void addStmtProcedure(String name, String sql) {
-        addStmtProcedure(name, sql, null);
+        addStmtProcedure(name, sql, new ProcedurePartitionData());
     }
 
-    public void addStmtProcedure(String name, String sql, String partitionInfo) {
-        addProcedures(new ProcedureInfo(new String[0], name, sql, partitionInfo));
+    // compatible with old deprecated syntax for test ONLY
+    public void addStmtProcedure(String name, String sql, String partitionInfoString) {
+        addProcedures(new ProcedureInfo(new String[0], name, sql,
+                ProcedurePartitionData.fromPartitionInfoString(partitionInfoString)));
     }
 
-    public void addProcedures(final Class<?>... procedures) {
+    public void addStmtProcedure(String name, String sql, ProcedurePartitionData partitionData) {
+        addProcedures(new ProcedureInfo(new String[0], name, sql, partitionData));
+    }
+
+    public void addMultiPartitionProcedures(final Class<?>... procedures) {
         final ArrayList<ProcedureInfo> procArray = new ArrayList<>();
         for (final Class<?> procedure : procedures)
-            procArray.add(new ProcedureInfo(new String[0], procedure));
+            procArray.add(new ProcedureInfo(procedure));
         addProcedures(procArray);
     }
 
+    public void addProcedure(final Class<?> cls) {
+        addProcedures(new ProcedureInfo(cls));
+    }
+
+    public void addProcedure(final Class<?> cls, String partitionString) {
+        addProcedures(new ProcedureInfo(cls,
+                ProcedurePartitionData.fromPartitionInfoString(partitionString)));
+    }
+
+    public void addProcedure(final Class<?> cls, final ProcedurePartitionData partitionInfo) {
+        addProcedures(new ProcedureInfo(cls, partitionInfo));
+    }
+
     /*
-     * List of roles permitted to invoke the procedure
+     * List of procedures permitted to invoke the procedure
      */
     public void addProcedures(final ProcedureInfo... procedures) {
         final ArrayList<ProcedureInfo> procArray = new ArrayList<>();
@@ -563,21 +593,31 @@ public class VoltProjectBuilder {
                 roleInfo.replace(length - 1, length, " ");
             }
 
-            if(procedure.cls != null) {
-                transformer.append("CREATE PROCEDURE " + roleInfo.toString() + " FROM CLASS " + procedure.cls.getName() + ";");
-            }
-            else if(procedure.sql != null) {
-                transformer.append("CREATE PROCEDURE " + procedure.name + roleInfo.toString() + " AS " + procedure.sql);
+            String partitionProcedureStatement = "";
+            if(procedure.partitionData != null && procedure.partitionData.m_tableName != null) {
+                String tableName = procedure.partitionData.m_tableName;
+                String columnName = procedure.partitionData.m_columnName;
+                String paramIndex = procedure.partitionData.m_paramIndex;
+
+                partitionProcedureStatement = " PARTITION ON TABLE "+ tableName + " COLUMN " + columnName +
+                        " PARAMETER " + paramIndex + " ";
+
+                if (procedure.partitionData.m_tableName2 != null) {
+                    String tableName2 = procedure.partitionData.m_tableName2;
+                    String columnName2 = procedure.partitionData.m_columnName2;
+                    String paramIndex2 = procedure.partitionData.m_paramIndex2;
+                    partitionProcedureStatement += " AND ON TABLE "+ tableName2 + " COLUMN " + columnName2 +
+                            " PARAMETER " + paramIndex2 + " ";
+                }
             }
 
-            if(procedure.partitionInfo != null) {
-                String[] parameter = procedure.partitionInfo.split(":");
-                String[] token = parameter[0].split("\\.");
-                String position = "";
-                if(parameter.length >= 2 && Integer.parseInt(parameter[1].trim()) > 0) {
-                    position = " PARAMETER " + parameter[1];
-                }
-                transformer.append("PARTITION PROCEDURE " + procedure.name + " ON TABLE " + token[0] + " COLUMN " + token[1] + position + ";");
+            if(procedure.cls != null) {
+                transformer.append("CREATE PROCEDURE " + partitionProcedureStatement + roleInfo.toString() +
+                        " FROM CLASS " + procedure.cls.getName() + ";");
+            }
+            else if(procedure.sql != null) {
+                transformer.append("CREATE PROCEDURE " + procedure.name + partitionProcedureStatement + roleInfo.toString() +
+                        " AS " + procedure.sql);
             }
         }
     }
@@ -621,6 +661,10 @@ public class VoltProjectBuilder {
 
     public void setSslExternal(final boolean enabled) {
         m_sslExternal = enabled;
+    }
+
+    public void setSslDR(final boolean enabled) {
+        m_sslDR = enabled;
     }
 
     public void setKeyStoreInfo(final String path, final String password) {
@@ -669,10 +713,6 @@ public class VoltProjectBuilder {
         m_heartbeatTimeout = seconds;
     }
 
-    public void setDefaultConsistencyReadLevel(Consistency.ReadLevel level) {
-        m_consistencyReadLevel = level;
-    }
-
     public void addImport(boolean enabled, String importType, String importFormat, String importBundle, Properties config) {
          addImport(enabled, importType, importFormat, importBundle, config, new Properties());
     }
@@ -686,7 +726,6 @@ public class VoltProjectBuilder {
         if (importFormat != null) {
             importConnector.put("ilFormatter", importFormat);
         }
-
         if (formatConfig != null) {
             importConnector.put("ilFormatterConfig", formatConfig);
         }
@@ -758,6 +797,10 @@ public class VoltProjectBuilder {
         m_drConsumerConnectionEnabled = false;
     }
 
+    public void setDrConsumerSslPropertyFile(String sslPropertyFile) {
+        m_drConsumerSslPropertyFile = getResourcePath(sslPropertyFile);
+    }
+
     public void setDrProducerEnabled()
     {
         m_drProducerEnabled = true;
@@ -778,19 +821,6 @@ public class VoltProjectBuilder {
 
     public void setXDCR() {
         m_drRole = DrRoleType.XDCR;
-    }
-
-    /**
-     * Override the procedure annotation with the specified values for a
-     * specified procedure.
-     *
-     * @param procName The name of the procedure to override the annotation.
-     * @param info The values to use instead of the annotation.
-     */
-    public void overrideProcInfoForProcedure(final String procName, final ProcInfoData info) {
-        assert(procName != null);
-        assert(info != null);
-        m_procInfoOverrides.put(procName, info);
     }
 
     public boolean compile(final String jarPath) {
@@ -834,7 +864,7 @@ public class VoltProjectBuilder {
             final int replication,
             final String voltRoot,
             final int clusterId) {
-        VoltCompiler compiler = new VoltCompiler(false);
+        VoltCompiler compiler = new VoltCompiler(m_drRole == DrRoleType.XDCR);
         if (compile(compiler, jarPath, voltRoot,
                        new DeploymentInfo(hostCount, sitesPerHost, replication, clusterId),
                        m_ppdEnabled, m_snapshotPath, m_ppdPrefix)) {
@@ -851,7 +881,7 @@ public class VoltProjectBuilder {
             final boolean ppdEnabled, final String snapshotPath,
             final String ppdPrefix)
     {
-        VoltCompiler compiler = new VoltCompiler(false);
+        VoltCompiler compiler = new VoltCompiler(m_drRole == DrRoleType.XDCR);
         return compile(compiler, jarPath, voltRoot,
                        new DeploymentInfo(hostCount, sitesPerHost, replication, clusterId),
                        ppdEnabled, snapshotPath, ppdPrefix);
@@ -908,7 +938,6 @@ public class VoltProjectBuilder {
 
         String[] schemaPath = m_schemas.toArray(new String[0]);
 
-        compiler.setProcInfoOverrides(m_procInfoOverrides);
         if (m_diagnostics != null) {
             compiler.enableDetailedCapture();
         }
@@ -1139,14 +1168,6 @@ public class VoltProjectBuilder {
             hb.setTimeout((int) m_heartbeatTimeout);
         }
 
-        // <consistency>
-        // don't include this element if not explicitly set
-        if (m_consistencyReadLevel != null) {
-            ConsistencyType ct = factory.createConsistencyType();
-            deployment.setConsistency(ct);
-            ct.setReadlevel(m_consistencyReadLevel.toReadLevelType());
-        }
-
         deployment.setSystemsettings(createSystemSettingsType(factory));
 
         // <users>
@@ -1179,6 +1200,7 @@ public class VoltProjectBuilder {
         deployment.setSsl(ssl);
         ssl.setEnabled(m_sslEnabled);
         ssl.setExternal(m_sslExternal);
+        ssl.setDr(m_sslDR);
         if (m_keystore!=null) {
             KeyOrTrustStoreType store = factory.createKeyOrTrustStoreType();
             store.setPath(m_keystore);
@@ -1254,6 +1276,7 @@ public class VoltProjectBuilder {
             ServerImportEnum importType = ServerImportEnum.fromValue(((String)importConnector.get("ilImportType")).toLowerCase());
             importConfig.setType(importType);
             importConfig.setModule((String )importConnector.get("ilModule"));
+
             String formatter = (String) importConnector.get("ilFormatter");
             if (formatter != null) {
                 importConfig.setFormat(formatter);
@@ -1261,6 +1284,10 @@ public class VoltProjectBuilder {
 
             Properties config = (Properties)importConnector.get("ilConfig");
             if((config != null) && (config.size() > 0)) {
+                String version = (String)config.get("version");
+                if (version != null) {
+                    importConfig.setVersion(version);
+                }
                 List<PropertyType> configProperties = importConfig.getProperty();
 
                 for( Object nameObj: config.keySet()) {
@@ -1301,6 +1328,7 @@ public class VoltProjectBuilder {
             conn.setSource(m_drMasterHost);
             conn.setPreferredSource(m_preferredSource);
             conn.setEnabled(m_drConsumerConnectionEnabled);
+            conn.setSsl(m_drConsumerSslPropertyFile);
         }
 
         // Have some yummy boilerplate!
@@ -1336,6 +1364,11 @@ public class VoltProjectBuilder {
             SystemSettingsType.Query query = factory.createSystemSettingsTypeQuery();
             query.setTimeout(m_queryTimeout);
             systemSettingType.setQuery(query);
+        }
+        if (m_procedureLogThreshold != null) {
+            SystemSettingsType.Procedure procedure = factory.createSystemSettingsTypeProcedure();
+            procedure.setLoginfo(m_procedureLogThreshold);
+            systemSettingType.setProcedure(procedure);
         }
         if (m_rssLimit != null || m_snmpRssLimit != null) {
             ResourceMonitorType monitorType = initializeResourceMonitorType(systemSettingType, factory);

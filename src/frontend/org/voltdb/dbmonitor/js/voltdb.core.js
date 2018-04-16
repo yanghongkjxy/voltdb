@@ -329,6 +329,7 @@
                 '@ExplainProc': { '1': ['varchar'] },
                 '@ExplainView': { '1': ['varchar'] },
                 '@Pause': { '0': [] },
+                '@Ping': { '0': [] },
                 '@Promote': { '0': [] },
                 '@Quiesce': { '0': [] },
                 '@Resume': { '0': [] },
@@ -348,6 +349,7 @@
                 '@GC': { '0': [] },
                 '@StopNode': { '1': ['int'] },
                 '@Trace': { '2': ['varchar', 'varchar'], '1': ['varchar']},
+                '@SwapTables': { '2': ['varchar', 'varchar']}
             };
             return this;
         };
@@ -550,7 +552,7 @@
             } else {
                 jQuery.each(connection.procedureCommands.procedures, function (id, procedure) {
                     connectionQueue.BeginExecute(procedure['procedure'], (procedure['value'] === undefined ? procedure['parameter'] : [procedure['parameter'], procedure['value']]), function (data) {
-                        var suffix = (processName == "GRAPH_MEMORY" || processName == "GRAPH_TRANSACTION") || processName == "TABLE_INFORMATION" || processName == "TABLE_INFORMATION_CLIENTPORT" || processName == "CLUSTER_INFORMATION" || processName == "CLUSTER_REPLICA_INFORMATION" || processName == "GET_HOST_SITE_COUNT" || processName == "EXPORT_TABLE_INFORMATION"? "_" + processName : "";
+                        var suffix = (processName == "GRAPH_MEMORY" || processName == "GRAPH_TRANSACTION") || processName == "TABLE_INFORMATION" || processName == "TABLE_INFORMATION_CLIENTPORT" || processName == "CLUSTER_INFORMATION" || processName == "CLUSTER_REPLICA_INFORMATION" || processName == "GET_HOST_SITE_COUNT" || processName == "EXPORT_TABLE_INFORMATION" || processName == "TABLE_INFORMATION_ONLY"? "_" + processName : "";
 
                         if (processName == "SYSTEMINFORMATION_STOPSERVER") {
                             connection.Metadata[procedure['procedure'] + "_" + procedure['parameter'] + suffix + "_status"] = data.status;
@@ -588,6 +590,7 @@
                     '@Explain': { '1': ['SQL (varchar)', 'Returns Table[]'] },
                     '@ExplainProc': { '1': ['Stored Procedure Name (varchar)', 'Returns Table[]'] },
                     '@ExplainView': { '1': ['Materialized View Name (varchar)', 'Returns Table[]'] },
+                    '@Ping': { '0': ['Returns bit'] },
                     '@Pause': { '0': ['Returns bit'] },
                     '@Quiesce': { '0': ['Returns bit'] },
                     '@Resume': { '0': ['Returns bit'] },
@@ -606,6 +609,7 @@
                     '@ValidatePartitioning': { '2': ['HashinatorType (int)', 'Config (varbinary)', 'Returns Table[]'] },
                     '@GetPartitionKeys': { '1': ['VoltType (varchar)', 'Returns Table[]'] },
                     '@Trace': { '2': ['Trace Category State (varchar)', 'Category (varchar)', 'Returns Table[]'], '1': ['Trace State (varchar)', 'Returns Table[]']},
+                    '@SwapTables': { '2': ['Table Name (varchar)', 'Table Name (varchar)', 'Returns Table[]'] }
                 };
 
                 var childConnectionQueue = connection.getQueue();

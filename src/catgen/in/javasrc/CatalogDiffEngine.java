@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -23,10 +23,13 @@ package org.voltdb.catalog;
 
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Map.Entry;
 import java.util.SortedMap;
 import java.util.SortedSet;
@@ -42,6 +45,7 @@ import org.voltdb.compiler.deploymentfile.DrRoleType;
 import org.voltdb.expressions.AbstractExpression;
 import org.voltdb.utils.CatalogSizing;
 import org.voltdb.utils.CatalogUtil;
+import org.voltdb.utils.CompressionService;
 import org.voltdb.utils.Encoder;
 
 public class CatalogDiffEngine {
@@ -167,6 +171,7 @@ public class CatalogDiffEngine {
      * @param next Tip of the new catalog.
      */
     public CatalogDiffEngine(Catalog prev, Catalog next, boolean forceVerbose) {
+        initialize(prev, next);
         m_supported = true;
         if (forceVerbose) {
             m_triggeredVerbosity = true;
@@ -204,6 +209,13 @@ public class CatalogDiffEngine {
         this(prev, next, false);
     }
 
+    /**
+     * Override this to do initializations before the diff is calculated.
+     * The parameters are the same catalog parameters passed into the constructor.
+     */
+    protected void initialize(Catalog prev, Catalog next) {
+    }
+
     public String commands() {
         return m_sb.toString();
     }
@@ -228,8 +240,40 @@ public class CatalogDiffEngine {
      * @return true if changes require export generation to be updated.
      */
     public boolean requiresNewExportGeneration() {
-        // TODO: return m_requiresNewExportGeneration;
-        return true;
+        return m_requiresNewExportGeneration;
+    }
+
+    public boolean hasSecurityUserChanges() {
+        CatalogChangeGroup ccg = m_changes.get(DiffClass.USER);
+        if (!ccg.groupAdditions.isEmpty()) {
+            return true;
+        }
+
+        if (!ccg.groupDeletions.isEmpty()) {
+            return true;
+        }
+
+        if (ccg.groupChanges.isEmpty()) {
+            return false;
+        }
+
+        Map<CatalogType, TypeChanges> groupModifications = new TreeMap<CatalogType, TypeChanges>();
+        groupModifications.putAll(ccg.groupChanges);
+        //ignore these fields for changes since these fields are dynamically encrypted.
+        //user object updates are tracked with passwords, not the SHAed ones.
+        //In the future, any new fields which are not part of the user updates, should be
+        //added to the list.
+        List<String> ignoredFields = Arrays.asList("shadowPassword", "sha256ShadowPassword");
+        for (Map.Entry<CatalogType, TypeChanges> entry : ccg.groupChanges.entrySet()) {
+            Set<String> fields = new HashSet<>();
+            fields.addAll(entry.getValue().typeChanges.changedFields);
+            fields.remove(ignoredFields);
+            if (fields.isEmpty()) {
+                groupModifications.remove(entry.getKey());
+            }
+        }
+
+        return !groupModifications.isEmpty();
     }
 
     public String[][] tablesThatMustBeEmpty() {
@@ -886,30 +930,45 @@ public class CatalogDiffEngine {
             return null;
         }
 
+        // Allow functions to add dependers.
+        if (suspect instanceof Function && field.equals("stmtDependers")) {
+            return null;
+        }
         // Support modification of these specific fields
-        if (suspect instanceof Database && field.equals("schema"))
+        if (suspect instanceof Database && field.equals("schema")) {
             return null;
-        if (suspect instanceof Database && "securityprovider".equals(field))
+        }
+        if (suspect instanceof Database && "securityprovider".equals(field)) {
             return null;
-        if (suspect instanceof Cluster && field.equals("securityEnabled"))
+        }
+        if (suspect instanceof Cluster && field.equals("securityEnabled")) {
             return null;
-        if (suspect instanceof Cluster && field.equals("adminstartup"))
+        }
+        if (suspect instanceof Cluster && field.equals("adminstartup")) {
             return null;
-        if (suspect instanceof Cluster && field.equals("heartbeatTimeout"))
+        }
+        if (suspect instanceof Cluster && field.equals("heartbeatTimeout")) {
             return null;
-        if (suspect instanceof Cluster && field.equals("drProducerEnabled"))
+        }
+        if (suspect instanceof Cluster && field.equals("drProducerEnabled")) {
             return null;
-        if (suspect instanceof Cluster && field.equals("drConsumerEnabled"))
+        }
+        if (suspect instanceof Cluster && field.equals("drConsumerEnabled")) {
             return null;
-        if (suspect instanceof Cluster && field.equals("preferredSource"))
+        }
+        if (suspect instanceof Cluster && field.equals("preferredSource")) {
             return null;
-        if (suspect instanceof Connector && "enabled".equals(field))
+        }
+        if (suspect instanceof Connector && "enabled".equals(field)) {
             return null;
-        if (suspect instanceof Connector && "loaderclass".equals(field))
+        }
+        if (suspect instanceof Connector && "loaderclass".equals(field)) {
             return null;
+        }
         // ENG-6511 Allow materialized views to change the index they use dynamically.
-        if (suspect instanceof IndexRef && field.equals("name"))
+        if (suspect instanceof IndexRef && field.equals("name")) {
             return null;
+        }
 
         // Avoid over-generalization when describing limitations that are dependent on particular
         // cases of BEFORE and AFTER values by listing the offending values.
@@ -945,6 +1004,8 @@ public class CatalogDiffEngine {
                 else {
                     restrictionQualifier = " from " + prevRole + " to " + newRole;
                 }
+            } else if (field.equals("drConsumerSslPropertyFile")) {
+                return null;
             }
         }
 
@@ -1025,6 +1086,10 @@ public class CatalogDiffEngine {
                     }
                 }
                 else {
+                    // ENG-13094 If the data type already changed, we do not throw more errors about the size.
+                    if ( ! field.equals("type")) {
+                        return null;
+                    }
                     restrictionQualifier = " from " + oldType.toSQLString() +
                                            " to " + newType.toSQLString();
                 }
@@ -1279,11 +1344,18 @@ public class CatalogDiffEngine {
             return true;
         }
 
-        if (suspect instanceof Table ||
+        // Information about user-defined functions need to be applied to EE.
+        // Because the EE needs to know about the parameter types and the return type to do
+        // many type casting operations.
+        if (suspect instanceof Function) {
+            return true;
+        }
+
+        if (suspect instanceof Table || suspect instanceof TableRef ||
                 suspect instanceof Column || suspect instanceof ColumnRef ||
                 suspect instanceof Index || suspect instanceof IndexRef ||
                 suspect instanceof Constraint || suspect instanceof ConstraintRef ||
-                suspect instanceof MaterializedViewInfo) {
+                suspect instanceof MaterializedViewInfo || suspect instanceof MaterializedViewHandlerInfo) {
             return true;
         }
 
@@ -1352,10 +1424,10 @@ public class CatalogDiffEngine {
     /**
      * Add a deletion
      */
-    private void writeDeletion(CatalogType prevType, CatalogType newlyChildlessParent, String mapName, String name)
+    private void writeDeletion(CatalogType prevType, CatalogType newlyChildlessParent, String mapName)
     {
         // Don't write deletions if the field can be ignored
-        if (checkDeleteIgnoreList(prevType, newlyChildlessParent, mapName, name)) {
+        if (checkDeleteIgnoreList(prevType, newlyChildlessParent, mapName, prevType.getTypeName())) {
             return;
         }
 
@@ -1378,12 +1450,16 @@ public class CatalogDiffEngine {
 
         // write the commands to make it so
         // they will be ignored if the change is unsupported
-        m_sb.append("delete ").append(prevType.getParent().getCatalogPath()).append(" ");
-        m_sb.append(mapName).append(" ").append(name).append("\n");
+        m_sb.append(getDeleteDiffStatement(prevType, mapName));
 
         // add it to the set of deletions to later compute descriptive text
         CatalogChangeGroup cgrp = m_changes.get(DiffClass.get(prevType));
         cgrp.processDeletion(prevType, newlyChildlessParent);
+    }
+
+    public static String getDeleteDiffStatement(CatalogType toDelete, String parentName) {
+        return "delete " + toDelete.getParent().getCatalogPath() + " " +
+            parentName + " " + toDelete.getTypeName() + "\n";
     }
 
     /**
@@ -1522,14 +1598,26 @@ public class CatalogDiffEngine {
                             if (field.equals("plannodetree")) {
                                 try {
                                     System.out.println("DEBUG VERBOSE where prev plannodetree expands to: " +
-                                            new String(Encoder.decodeBase64AndDecompressToBytes((String)prevValue), "UTF-8"));
+                                            new String(CompressionService.decodeBase64AndDecompressToBytes((String)prevValue), "UTF-8"));
                                 }
-                                catch (UnsupportedEncodingException e) {}
+                                catch (Exception e) {
+                                    try {
+                                        System.out.println("DEBUG VERBOSE where prev plannodetree expands to: " +
+                                                new String(Encoder.decodeBase64AndDecompressToBytes((String)prevValue), "UTF-8"));
+                                    }
+                                    catch (UnsupportedEncodingException e2) {}
+                                }
                                 try {
-                                    System.out.println("DEBUG VERBOSE and new plannodetree expands to: " +
-                                            new String(Encoder.decodeBase64AndDecompressToBytes((String)newValue), "UTF-8"));
+                                    System.out.println("DEBUG VERBOSE where new plannodetree expands to: " +
+                                            new String(CompressionService.decodeBase64AndDecompressToBytes((String)newValue), "UTF-8"));
                                 }
-                                catch (UnsupportedEncodingException e) {}
+                                catch (Exception e) {
+                                    try {
+                                        System.out.println("DEBUG VERBOSE where new plannodetree expands to: " +
+                                                new String(Encoder.decodeBase64AndDecompressToBytes((String)newValue), "UTF-8"));
+                                    }
+                                    catch (UnsupportedEncodingException e2) {}
+                                }
                             }
                         }
                         writeModification(newType, prevType, field);
@@ -1590,7 +1678,7 @@ public class CatalogDiffEngine {
             String name = prevType.getTypeName();
             CatalogType newType = newMap.get(name);
             if (newType == null) {
-                writeDeletion(prevType, newMap.m_parent, mapName, name);
+                writeDeletion(prevType, newMap.m_parent, mapName);
                 continue;
             }
 

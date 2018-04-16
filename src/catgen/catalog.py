@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 # This file is part of VoltDB.
-# Copyright (C) 2008-2017 VoltDB Inc.
+# Copyright (C) 2008-2018 VoltDB Inc.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -542,10 +542,16 @@ def gencpp( classes, javaOnlyClasses, prepath, postpath ):
                 write ( interp( '$ftype $clsname::$pubname() const {\n    return $privname;\n}\n', locals() ) )
 
 #
+# Set this to true to start debugging.
+#
+debug = False
+
+#
 # Main.
 #
 
 def main():
+    global debug
     specpath = "spec.txt"
     javapkg = 'org.voltdb.catalog'
     cpp_postpath = 'out/cppsrc'
@@ -553,7 +559,7 @@ def main():
     java_prepath = 'in/javasrc'
     java_postpath = 'out/javasrc'
     f =  file( specpath )
-    classes, javaOnlyClasses = parse( f.read() )
+    classes, javaOnlyClasses = parse( f.read(), debug )
     genjava( classes, javaOnlyClasses, java_prepath, java_postpath, javapkg )
     gencpp( classes, javaOnlyClasses, cpp_prepath, cpp_postpath )
 

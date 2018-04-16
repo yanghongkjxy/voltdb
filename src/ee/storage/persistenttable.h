@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -66,9 +66,10 @@
 #include "storage/TableStreamerInterface.h"
 #include "storage/RecoveryContext.h"
 #include "storage/ElasticIndex.h"
-#include "storage/CopyOnWriteIterator.h"
+#include "storage/DRTupleStream.h"
 #include "common/UndoQuantumReleaseInterest.h"
 #include "common/ThreadLocalPool.h"
+#include "common/SynchronizedThreadLock.h"
 
 class CompactionTest_BasicCompaction;
 class CompactionTest_CompactionWithCopyOnWrite;
@@ -215,9 +216,6 @@ private:
     PersistentTable(PersistentTable const&);
     PersistentTable operator=(PersistentTable const&);
 
-    // default iterator
-    TableIterator m_iter;
-
     virtual void initializeWithColumns(TupleSchema* schema,
             std::vector<std::string> const& columnNames,
             bool ownsTupleSchema,
@@ -245,19 +243,14 @@ public:
     }
 
     // Return a table iterator by reference
-    TableIterator& iterator() {
-        m_iter.reset(m_data.begin());
-        return m_iter;
+    TableIterator iterator() {
+        return TableIterator(this, m_data.begin());
     }
 
-    JumpingTableIterator* makeJumpingIterator() {
-        return new JumpingTableIterator(this, m_data.begin(), m_data.end());
-    }
-
-    TableIterator& iteratorDeletingAsWeGo() {
-        m_iter.reset(m_data.begin());
-        m_iter.setTempTableDeleteAsGo(false);
-        return m_iter;
+    TableIterator iteratorDeletingAsWeGo() {
+        // we don't delete persistent tuples "as we go",
+        // so just return a normal iterator.
+        return TableIterator(this, m_data.begin());
     }
 
 
@@ -266,7 +259,7 @@ public:
     // ------------------------------------------------------------------
     virtual void deleteAllTuples(bool, bool fallible = true);
 
-    void truncateTable(VoltDBEngine* engine, bool fallible = true);
+    void truncateTable(VoltDBEngine* engine, bool replicatedTable = true, bool fallible = true);
 
     void swapTable
            (PersistentTable* otherTable,
@@ -365,7 +358,12 @@ public:
     // ------------------------------------------------------------------
     std::string tableType() const;
     bool equals(PersistentTable* other);
-    virtual std::string debug();
+
+    // Return a string containing info about this table
+    std::string debug() const {
+        return debug("");
+    }
+    virtual std::string debug(const std::string &spacer) const;
 
     /*
      * Find the block a tuple belongs to. Returns TBPtr(NULL) if no block is found.
@@ -448,6 +446,16 @@ public:
 
     bool isReplicatedTable() const { return (m_partitionColumn == -1); }
 
+    bool isCatalogTableReplicated() const {
+        if (!m_isMaterialized && m_isReplicated != (m_partitionColumn == -1)) {
+            VOLT_ERROR("CAUTION: detected inconsistent isReplicate flag. Table name:%s\n", m_name.c_str());
+        }
+        return m_isReplicated;
+    }
+
+    UndoQuantumReleaseInterest *getReplicatedInterest() { return &m_releaseReplicated; }
+    UndoQuantumReleaseInterest *getDummyReplicatedInterest() { return &m_releaseDummyReplicated; }
+
     /** Returns true if DR is enabled for this table */
     bool isDREnabled() const { return m_drEnabled; }
 
@@ -461,7 +469,7 @@ public:
     int getDRTimestampColumnIndex() const { return m_drTimestampColumnIndex; }
 
     // for test purpose
-    void setDR(bool flag) { m_drEnabled = flag; }
+    void setDR(bool flag) { m_drEnabled = (flag && !m_isMaterialized); }
 
     void setTupleLimit(int32_t newLimit) { m_tupleLimit = newLimit; }
 
@@ -477,7 +485,7 @@ public:
 
     virtual int64_t validatePartitioning(TheHashinator* hashinator, int32_t partitionId);
 
-    void truncateTableUndo(TableCatalogDelegate* tcd, PersistentTable* originalTable);
+    void truncateTableUndo(TableCatalogDelegate* tcd, PersistentTable* originalTable, bool replicatedTableAction);
 
     void truncateTableRelease(PersistentTable* originalTable);
 
@@ -546,9 +554,11 @@ public:
 
     std::vector<uint64_t> getBlockAddresses() const;
 
+    bool doDRActions(AbstractDRTupleStream* drStream);
+
 private:
     // Zero allocation size uses defaults.
-    PersistentTable(int partitionColumn, char const* signature, bool isMaterialized, int tableAllocationTargetSize = 0, int tuplelimit = INT_MAX, bool drEnabled = false);
+    PersistentTable(int partitionColumn, char const* signature, bool isMaterialized, int tableAllocationTargetSize = 0, int tuplelimit = INT_MAX, bool drEnabled = false, bool isReplicated = false);
 
     /**
      * Prepare table for streaming from serialized data (internal for tests).
@@ -574,7 +584,8 @@ private:
     }
 
     bool blockCountConsistent() const {
-        return m_blocksNotPendingSnapshot.size() == m_data.size();
+        // if the table is empty, the empty cache block will not be present in m_blocksNotPendingSnapshot
+        return isPersistentTableEmpty() || m_blocksNotPendingSnapshot.size() == m_data.size();
     }
 
     void snapshotFinishedScanningBlock(TBPtr finishedBlock, TBPtr nextBlock) {
@@ -608,7 +619,6 @@ private:
                                     TableTuple const& sourceTupleWithNewValues,
                                     std::vector<TableIndex*> const& indexesToUpdate);
 
-    bool checkNulls(TableTuple& tuple) const;
 
     void notifyBlockWasCompactedAway(TBPtr block);
 
@@ -622,7 +632,9 @@ private:
     // occurs. In case of exception, target tuple should be released, but the
     // source tuple's memory should still be retained until the exception is
     // handled.
-    void insertTupleCommon(TableTuple& source, TableTuple& target, bool fallible, bool shouldDRStream = true);
+    void insertTupleCommon(TableTuple& source, TableTuple& target, bool fallible, bool shouldDRStream = true, bool delayTupleDelete= false);
+
+    void doInsertTupleCommon(TableTuple& source, TableTuple& target, bool fallible, bool shouldDRStream = true, bool delayTupleDelete = false);
 
     void insertTupleForUndo(char* tuple);
 
@@ -644,13 +656,14 @@ private:
 
     /*
      * Implemented by persistent table and called by Table::loadTuplesFrom
-     * to do additional processing for views and Export
+     * for loadNextDependency or processRecoveryMessage
      */
     virtual void processLoadedTuple(TableTuple& tuple,
                                     ReferenceSerializeOutput* uniqueViolationOutput,
                                     int32_t& serializedTupleCount,
                                     size_t& tupleCountPosition,
-                                    bool shouldDRStreamRows);
+                                    bool shouldDRStreamRows = false,
+                                    bool ignoreTupleLimit = true);
 
     enum LookupType {
         LOOKUP_BY_VALUES,
@@ -660,10 +673,18 @@ private:
 
     TableTuple lookupTuple(TableTuple tuple, LookupType lookupType);
 
+    TBPtr allocateFirstBlock();
+
     TBPtr allocateNextBlock();
 
     AbstractDRTupleStream* getDRTupleStream(ExecutorContext* ec) {
-        return isReplicatedTable() ? ec->drReplicatedStream() : ec->drStream();
+        if (isReplicatedTable()) {
+            if (ec->drStream()->drProtocolVersion() >= DRTupleStream::NO_REPLICATED_STREAM_PROTOCOL_VERSION) {
+                return (ec->m_partitionId == 0) ? ec->drStream() : NULL;
+            }
+            return ec->drReplicatedStream();
+        }
+        return ec->drStream();
     }
 
     void setDRTimestampForTuple(ExecutorContext* ec, TableTuple& tuple, bool update);
@@ -701,7 +722,19 @@ private:
                           std::vector<TableIndex*> const& theIndexes,
                           std::vector<TableIndex*> const& otherIndexes);
 
+    // pointers to chunks of data. Specific to table impl. Don't leak this type.
+    TBMap m_data;
+
+    // default iterator
+    TableIterator m_iter;
+
     // CONSTRAINTS
+    //Is this a materialized view?
+    bool m_isMaterialized;
+
+    // Value reads from catalog table, no matter partition column exists or not
+    bool m_isReplicated;
+
     std::vector<bool> m_allowNulls;
 
     // partition key
@@ -740,9 +773,6 @@ private:
     // Provides access to all table streaming apparati, including COW and recovery.
     boost::shared_ptr<TableStreamerInterface> m_tableStreamer;
 
-    // pointers to chunks of data. Specific to table impl. Don't leak this type.
-    TBMap m_data;
-
     int m_failedCompactionCount;
 
     // This is a testability feature not intended for use in product logic.
@@ -754,9 +784,6 @@ private:
     // The original table subject to ELASTIC INDEX streaming prior to any swaps
     // or truncates in the current transaction.
     PersistentTable*  m_tableForStreamIndexing;
-
-    //Is this a materialized view?
-    bool m_isMaterialized;
 
     // is DR enabled
     bool m_drEnabled;
@@ -796,6 +823,10 @@ private:
     PersistentTable* m_deltaTable;
 
     bool m_deltaTableActive;
+
+    // Objects used to coordinate compaction of Replicated tables
+    SynchronizedUndoQuantumReleaseInterest m_releaseReplicated;
+    SynchronizedDummyUndoQuantumReleaseInterest m_releaseDummyReplicated;
 };
 
 inline PersistentTableSurgeon::PersistentTableSurgeon(PersistentTable& table) :
@@ -991,7 +1022,7 @@ inline void PersistentTable::deleteTupleStorage(TableTuple& tuple, TBPtr block,
 
     // This frees referenced strings -- when could possibly be a better time?
     if (m_schema->getUninlinedObjectColumnCount() != 0) {
-        decreaseStringMemCount(tuple.getNonInlinedMemorySize());
+        decreaseStringMemCount(tuple.getNonInlinedMemorySizeForPersistentTable());
         tuple.freeObjectColumns();
     }
 
@@ -1030,11 +1061,19 @@ inline void PersistentTable::deleteTupleStorage(TableTuple& tuple, TBPtr block,
         }
     }
 
-    if (block->isEmpty() && (m_data.size() > 1 || deleteLastEmptyBlock)) {
-        // Release the empty block unless it's the only remaining block and caller has requested not to do so.
-        // The intent of doing so is to avoid block allocation cost at time tuple insertion into the table
-        m_data.erase(block->address());
-        m_blocksWithSpace.erase(block);
+    if (block->isEmpty()) {
+        if (m_data.size() > 1 || deleteLastEmptyBlock) {
+            // Release the empty block unless it's the only remaining block and caller has requested not to do so.
+            // The intent of doing so is to avoid block allocation cost at time tuple insertion into the table
+            m_data.erase(block->address());
+            m_blocksWithSpace.erase(block);
+        }
+        else {
+            // In the unlikely event that tuplesPerBlock == 1
+            if (transitioningToBlockWithSpace) {
+                m_blocksWithSpace.insert(block);
+            }
+        }
         m_blocksNotPendingSnapshot.erase(block);
         assert(m_blocksPendingSnapshot.find(block) == m_blocksPendingSnapshot.end());
         //Eliminates circular reference
@@ -1065,6 +1104,12 @@ inline TBPtr PersistentTable::findBlock(char* tuple, TBMap& blocks, int blockSiz
     }
 
     return TBPtr(NULL);
+}
+
+inline TBPtr PersistentTable::allocateFirstBlock() {
+    TBPtr block(new TupleBlock(this, TBBucketPtr()));
+    m_data.insert(block->address(), block);
+    return block;
 }
 
 inline TBPtr PersistentTable::allocateNextBlock() {

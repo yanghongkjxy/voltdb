@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -45,14 +45,8 @@
 
 #include "abstractexpression.h"
 
-#include "common/debuglog.h"
 #include "common/serializeio.h"
-#include "common/types.h"
 #include "expressions/expressionutil.h"
-
-#include <sstream>
-#include <cassert>
-#include <stdexcept>
 
 namespace voltdb {
 

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -108,8 +108,8 @@
 #include "common/FatalException.hpp"
 #include "common/SegvException.hpp"
 #include "common/RecoveryProtoMessage.h"
-#include "common/LegacyHashinator.h"
 #include "common/ElasticHashinator.h"
+#include "common/ThreadLocalPool.h"
 #include "storage/DRTupleStream.h"
 #include "murmur3/MurmurHash3.h"
 #include "execution/VoltDBEngine.h"
@@ -185,7 +185,7 @@ void setupSigHandler(void) {
 // Create / Destroy
 ////////////////////////////////////////////////////////////////////////////
 /**
- * Just creates a new VoltDBEngine object and retunrs it to Java.
+ * Just creates a new VoltDBEngine object and returns it to Java.
  * Never fail to destroy() for the VoltDBEngine* once you call this method
  * NOTE: Call initialize() separately for initialization.
  * This does strictly nothing so that this method never throws an exception.
@@ -262,6 +262,7 @@ SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeIniti
     jint clusterIndex,
     jlong siteId,
     jint partitionId,
+    jint sitesPerHost,
     jint hostId,
     jbyteArray hostname,
     jint drClusterId,
@@ -289,6 +290,7 @@ SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeIniti
         engine->initialize(clusterIndex,
                            siteId,
                            partitionId,
+                           sitesPerHost,
                            hostId,
                            hostString,
                            drClusterId,
@@ -418,22 +420,21 @@ Java_org_voltdb_jni_ExecutionEngine_nativeLoadTable (
     }
 
     engine->resetReusedResultOutputBuffer();
-    engine->setUndoToken(undoToken);
 
     //JNIEnv pointer can change between calls, must be updated
     updateJNILogProxy(engine);
-    VOLT_DEBUG("loading table %d in C++...", table_id);
+    VOLT_DEBUG("loading table %d in C++ on thread %d", table_id, ThreadLocalPool::getThreadPartitionId());
 
     // deserialize dependency.
     jsize length = env->GetArrayLength(serialized_table);
-    VOLT_DEBUG("deserializing %d bytes ...", (int) length);
+    VOLT_DEBUG("deserializing %d bytes on thread %d", (int) length, ThreadLocalPool::getThreadPartitionId());
     jbyte *bytes = env->GetByteArrayElements(serialized_table, NULL);
     ReferenceSerializeInputBE serialize_in(bytes, length);
     try {
         try {
             bool success = engine->loadTable(table_id, serialize_in, txnId,
                                              spHandle, lastCommittedSpHandle, uniqueId,
-                                             returnUniqueViolations, shouldDRStream);
+                                             returnUniqueViolations, shouldDRStream, undoToken);
             env->ReleaseByteArrayElements(serialized_table, bytes, JNI_ABORT);
             VOLT_DEBUG("deserialized table");
 
@@ -502,11 +503,13 @@ int deserializeParameterSet(const char* serialized_parameterset, jint serialized
  * @return error code
 */
 SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeSetBuffers
-  (JNIEnv *env, jobject obj, jlong engine_ptr, jobject parameter_buffer, jint parameter_buffer_size,
-   jobject per_fragment_stats_buffer, jint per_fragment_stats_buffer_size,
-   jobject first_result_buffer, jint first_result_buffer_size,
-   jobject next_result_buffer, jint next_result_buffer_size,
-   jobject exception_buffer, jint exception_buffer_size)
+  (JNIEnv *env, jobject obj, jlong engine_ptr,
+    jobject parameter_buffer,          jint parameter_buffer_size,
+    jobject per_fragment_stats_buffer, jint per_fragment_stats_buffer_size,
+    jobject udf_buffer,                jint udf_buffer_size,
+    jobject first_result_buffer,       jint first_result_buffer_size,
+    jobject next_result_buffer,        jint next_result_buffer_size,
+    jobject exception_buffer,          jint exception_buffer_size)
 {
     VOLT_DEBUG("nativeSetBuffers() start");
     VoltDBEngine *engine = castToEngine(engine_ptr);
@@ -525,6 +528,10 @@ SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeSetBu
                 env->GetDirectBufferAddress(per_fragment_stats_buffer));
         int perFragmentStatsBufferCapacity = per_fragment_stats_buffer_size;
 
+        char *udfBuffer = reinterpret_cast<char*>(
+                 env->GetDirectBufferAddress(udf_buffer));
+        int udfBufferCapacity = udf_buffer_size;
+
         char *firstReusedResultBuffer = reinterpret_cast<char*>(
                 env->GetDirectBufferAddress(first_result_buffer));
         int firstReusedResultBufferCapacity = first_result_buffer_size;
@@ -537,11 +544,12 @@ SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeSetBu
                  env->GetDirectBufferAddress(exception_buffer));
         int exceptionBufferCapacity = exception_buffer_size;
 
-        engine->setBuffers(parameterBuffer, parameterBufferCapacity,
-                perFragmentStatsBuffer, perFragmentStatsBufferCapacity,
-                firstReusedResultBuffer, firstReusedResultBufferCapacity,
-                nextReusedResultBuffer, nextReusedResultBufferCapacity,
-                exceptionBuffer, exceptionBufferCapacity);
+        engine->setBuffers(parameterBuffer,         parameterBufferCapacity,
+                           perFragmentStatsBuffer,  perFragmentStatsBufferCapacity,
+                           udfBuffer,               udfBufferCapacity,
+                           firstReusedResultBuffer, firstReusedResultBufferCapacity,
+                           nextReusedResultBuffer,  nextReusedResultBufferCapacity,
+                           exceptionBuffer,         exceptionBufferCapacity);
     } catch (const FatalException &e) {
         topend->crashVoltDB(e);
     }
@@ -1197,19 +1205,9 @@ SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeHashi
         NValueArray& params = engine->getExecutorContext()->getParameterContainer();
         Pool *stringPool = engine->getStringPool();
         deserializeParameterSet(engine->getParameterBuffer(), engine->getParameterBufferCapacity(), params, engine->getStringPool());
-        HashinatorType hashinatorType = static_cast<HashinatorType>(voltdb::ValuePeeker::peekAsInteger(params[1]));
         boost::scoped_ptr<TheHashinator> hashinator;
-        const char *configValue = voltdb::ValuePeeker::peekObjectValue(params[2]);
-        switch (hashinatorType) {
-        case HASHINATOR_LEGACY:
-            hashinator.reset(LegacyHashinator::newInstance(configValue));
-            break;
-        case HASHINATOR_ELASTIC:
-            hashinator.reset(ElasticHashinator::newInstance(configValue, reinterpret_cast<int32_t*>(configPtr), static_cast<uint32_t>(tokenCount)));
-            break;
-        default:
-            return org_voltdb_jni_ExecutionEngine_ERRORCODE_ERROR;
-        }
+        const char *configValue = voltdb::ValuePeeker::peekObjectValue(params[1]);
+        hashinator.reset(ElasticHashinator::newInstance(configValue, reinterpret_cast<int32_t*>(configPtr), static_cast<uint32_t>(tokenCount)));
         int retval =
             hashinator->hashinate(params[0]);
         stringPool->purge();
@@ -1226,17 +1224,16 @@ SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeHashi
  * Method:    nativeUpdateHashinator
  * Signature: (JI)I
  */
-SHAREDLIB_JNIEXPORT void JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeUpdateHashinator(JNIEnv *env, jobject obj, jlong engine_ptr, jint type, jlong configPtr, jint tokenCount)
+SHAREDLIB_JNIEXPORT void JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeUpdateHashinator(JNIEnv *env, jobject obj, jlong engine_ptr, jlong configPtr, jint tokenCount)
 {
     VOLT_DEBUG("nativeUpdateHashinator in C++ called");
     VoltDBEngine *engine = castToEngine(engine_ptr);
     assert(engine);
     Topend *topend = static_cast<JNITopend*>(engine->getTopend())->updateJNIEnv(env);
     try {
-        HashinatorType hashinatorType = static_cast<HashinatorType>(type);
         //Fast path processing, just use the config given by pointer
         if (configPtr != 0) {
-            engine->updateHashinator(hashinatorType, NULL, reinterpret_cast<int32_t*>(configPtr), static_cast<uint32_t>(tokenCount));
+            engine->updateHashinator(NULL, reinterpret_cast<int32_t*>(configPtr), static_cast<uint32_t>(tokenCount));
             return;
         }
         updateJNILogProxy(engine); //JNIEnv pointer can change between calls, must be updated
@@ -1244,7 +1241,7 @@ SHAREDLIB_JNIEXPORT void JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeUpdat
         Pool *stringPool = engine->getStringPool();
         deserializeParameterSet(engine->getParameterBuffer(), engine->getParameterBufferCapacity(), params, engine->getStringPool());
         const char *configValue = voltdb::ValuePeeker::peekObjectValue(params[0]);
-        engine->updateHashinator(hashinatorType, configValue, reinterpret_cast<int32_t*>(configPtr), static_cast<uint32_t>(tokenCount));
+        engine->updateHashinator(configValue, reinterpret_cast<int32_t*>(configPtr), static_cast<uint32_t>(tokenCount));
         stringPool->purge();
     } catch (const FatalException &e) {
         topend->crashVoltDB(e);
@@ -1381,7 +1378,7 @@ SHAREDLIB_JNIEXPORT jlong JNICALL Java_org_voltdb_utils_PosixAdvise_fallocate
 SHAREDLIB_JNIEXPORT jlong JNICALL
 Java_org_voltdb_jni_ExecutionEngine_nativeApplyBinaryLog (
     JNIEnv *env, jobject obj, jlong engine_ptr,
-    jlong txnId, jlong spHandle, jlong lastCommittedSpHandle, jlong uniqueId, jint remoteClusterId, jlong undoToken)
+    jlong txnId, jlong spHandle, jlong lastCommittedSpHandle, jlong uniqueId, jint remoteClusterId, jint remotePartitionId, jlong undoToken)
 {
     VoltDBEngine *engine = castToEngine(engine_ptr);
     Topend *topend = static_cast<JNITopend*>(engine->getTopend())->updateJNIEnv(env);
@@ -1396,7 +1393,7 @@ Java_org_voltdb_jni_ExecutionEngine_nativeApplyBinaryLog (
     VOLT_DEBUG("applying binary log in C++...");
 
     try {
-        return engine->applyBinaryLog(txnId, spHandle, lastCommittedSpHandle, uniqueId, remoteClusterId, undoToken,
+        return engine->applyBinaryLog(txnId, spHandle, lastCommittedSpHandle, uniqueId, remoteClusterId, remotePartitionId, undoToken,
                                engine->getParameterBuffer() + sizeof(int64_t));
     } catch (const SerializableEEException &e) {
         engine->resetReusedResultOutputBuffer();
@@ -1410,7 +1407,7 @@ Java_org_voltdb_jni_ExecutionEngine_nativeApplyBinaryLog (
 
 SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeExecuteTask
   (JNIEnv *env, jobject obj, jlong engine_ptr) {
-    VOLT_DEBUG("nativeHashinate in C++ called");
+    VOLT_DEBUG("nativeExecuteTask in C++ called");
     VoltDBEngine *engine = castToEngine(engine_ptr);
     assert(engine);
     Topend *topend = static_cast<JNITopend*>(engine->getTopend())->updateJNIEnv(env);
@@ -1435,10 +1432,10 @@ SHAREDLIB_JNIEXPORT jint JNICALL Java_org_voltdb_jni_ExecutionEngine_nativeExecu
 /*
  * Class:     org_voltdb_jni_ExecutionEngine
  * Method:    getTestDRBuffer
- * Signature: (I[I[IJ)[B
+ * Signature: (II[I[IJ)[B
  */
 SHAREDLIB_JNIEXPORT jbyteArray JNICALL Java_org_voltdb_jni_ExecutionEngine_getTestDRBuffer
-  (JNIEnv *env, jclass clazz, jint partitionId, jintArray partitionKeyValues, jintArray flags,
+  (JNIEnv *env, jclass clazz, jint drProtocolVersion, jint partitionId, jintArray partitionKeyValues, jintArray flags,
           jlong startSequenceNumber) {
     try {
         jint *partitionKeyValuesJPtr = env->GetIntArrayElements(partitionKeyValues, NULL);
@@ -1455,8 +1452,9 @@ SHAREDLIB_JNIEXPORT jbyteArray JNICALL Java_org_voltdb_jni_ExecutionEngine_getTe
         assert(partitionKeyValueList.size() == flagList.size());
 
         char *output = new char[1024 * 256];
-        int32_t length = DRTupleStream::getTestDRBuffer(partitionId, partitionKeyValueList, flagList,
-                startSequenceNumber, output);
+        int32_t length = DRTupleStream::getTestDRBuffer(static_cast<uint8_t>(drProtocolVersion), partitionId,
+                                                        partitionKeyValueList, flagList,
+                                                        startSequenceNumber, output);
         jbyteArray array = env->NewByteArray(length);
         jbyte *arrayBytes = env->GetByteArrayElements(array, NULL);
         ::memcpy(arrayBytes, output, length);

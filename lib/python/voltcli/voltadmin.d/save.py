@@ -1,5 +1,5 @@
 # This file is part of VoltDB.
-# Copyright (C) 2008-2017 VoltDB Inc.
+# Copyright (C) 2008-2018 VoltDB Inc.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -16,6 +16,7 @@
 
 import os
 import urllib
+import sys
 
 @VOLT.Command(
     bundles = VOLT.AdminBundle(),
@@ -87,4 +88,8 @@ def save(runner):
     columns = [VOLT.FastSerializer.VOLTTYPE_STRING]
     response = runner.call_proc('@SnapshotSave', columns,
                                 ['{%s}' % (','.join(raw_json_opts))])
-    print response.table(0).format_table(caption = 'Snapshot Save Results')
+    res_table = response.table(0)
+    has_failure = any([t[3] != 'SUCCESS' for t in res_table.tuples()])
+    print res_table.format_table(caption = 'Snapshot Save Results')
+    if has_failure:
+        sys.exit(1)

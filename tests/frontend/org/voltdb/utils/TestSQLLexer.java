@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -83,14 +83,6 @@ public class TestSQLLexer {
         checkDDL("   dr table pants disable    ", "dr");
         checkDDL("drtable pants disable", null);
         checkDDL("-- dr table pants disable", null);
-
-        checkDDL("import class org.dont.exist", "import");
-        checkDDL("IMPORT class org.dont.exist", "import");
-        checkDDL("ImPoRt class org.dont.exist", "import");
-        checkDDL("    import class org.dont.exist", "import");
-        checkDDL("importclass org.dont.exist", null);
-        checkDDL("-- import class org.dont.exist", null);
-        checkDDL("improt class org.dont.exist", null);
 
         checkDDL("partition table pants", "partition");
         checkDDL("PARTITION table pants", "partition");

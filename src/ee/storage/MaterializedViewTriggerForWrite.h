@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -68,18 +68,21 @@ private:
                                           const NValue &initialNull,
                                           int negate_for_min,
                                           int aggIndex,
-                                          int minMaxAggIdx);
+                                          int minMaxAggIdx,
+                                          int aggExprOffset);
 
     NValue findMinMaxFallbackValueSequential(const TableTuple& oldTuple,
                                              const NValue &existingValue,
                                              const NValue &initialNull,
                                              int negate_for_min,
-                                             int aggIndex);
+                                             int aggIndex,
+                                             int aggExprOffset);
 
     NValue findFallbackValueUsingPlan(const TableTuple& oldTuple,
                                       const NValue &initialNull,
                                       int aggIndex,
-                                      int minMaxAggIdx);
+                                      int minMaxAggIdx,
+                                      int aggExprOffset);
 
     // the source persistent table
     PersistentTable *m_srcPersistentTable;

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -133,7 +133,7 @@ protected:
             persistent_table = TableFactory::getPersistentTable(database_id, "test_table", schema, columnNames, signature);
             m_table = persistent_table;
         } else {
-            temp_table = TableFactory::getTempTable(database_id, "test_temp_table", schema, columnNames, &limits);
+            temp_table = TableFactory::buildTempTable("test_temp_table", schema, columnNames, &limits);
             m_table = temp_table;
         }
 

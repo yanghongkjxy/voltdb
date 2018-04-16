@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -55,7 +55,7 @@
 
 namespace voltdb {
 
-class TempTable;
+class AbstractTempTable;
 class PersistentTable;
 
 class AbstractExpression;
@@ -68,6 +68,7 @@ class ProjectionPlanNode;
 class LimitPlanNode;
 
 class AggregateExecutorBase;
+class InsertExecutor;
 
 struct CountingPostfilter;
 
@@ -79,6 +80,7 @@ public:
         , m_projector()
         , m_searchKeyBackingStore(NULL)
         , m_aggExec(NULL)
+        , m_insertExec(NULL)
     {}
     ~IndexScanExecutor();
 
@@ -109,7 +111,7 @@ public:
 
 private:
     bool p_init(AbstractPlanNode*,
-                TempTableLimits* limits);
+                const ExecutorVector& executorVector);
     bool p_execute(const NValueArray &params);
     void outputTuple(CountingPostfilter& postfilter, TableTuple& tuple);
 
@@ -129,9 +131,10 @@ private:
 
     IndexLookupType m_lookupType;
     SortDirectionType m_sortDirection;
+    bool m_hasOffsetRankOptimization;
 
     // IndexScan Information
-    TempTable* m_outputTable;
+    AbstractTempTable* m_outputTable;
 
     // arrange the memory mgmt aids at the bottom to try to maximize
     // cache hits (by keeping them out of the way of useful runtime data)
@@ -141,6 +144,7 @@ private:
     char* m_searchKeyBackingStore;
 
     AggregateExecutorBase* m_aggExec;
+    InsertExecutor *m_insertExec;
 };
 
 }

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -57,6 +57,20 @@ public class ZKCountdownLatch
             countedDown = true;
             return;
         }
+    }
+
+    // Returns the current count
+    public int getCount() throws InterruptedException, KeeperException {
+        return ByteBuffer.wrap(m_zk.getData(m_path, false, null)).getInt();
+    }
+
+    // Returns if already counted down to zero
+    public boolean isCountedDown() throws InterruptedException, KeeperException {
+        if (countedDown) return true;
+        int count = ByteBuffer.wrap(m_zk.getData(m_path, false, null)).getInt();
+        if (count > 0) return false;
+        countedDown = true;
+        return true;
     }
 
     public void countDown() throws InterruptedException, KeeperException {

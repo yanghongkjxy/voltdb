@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -23,6 +23,7 @@
 
 package org.voltdb_testprocs.regressionsuites.querytimeout;
 
+import org.voltdb.SQLStmtAdHocHelper;
 import org.voltdb.VoltProcedure;
 import org.voltdb.VoltTable;
 
@@ -34,7 +35,7 @@ public class AdHocPartitionReadOnlyProc extends VoltProcedure {
 
     @SuppressWarnings("deprecation")
     public VoltTable[] run() {
-        voltQueueSQLExperimental(longRunningCrossJoinAgg);
+        SQLStmtAdHocHelper.voltQueueSQLExperimental(this, longRunningCrossJoinAgg);
         return voltExecuteSQL(true);
     }
 }

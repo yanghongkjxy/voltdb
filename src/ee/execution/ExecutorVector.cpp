@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -48,11 +48,7 @@
 #include "catalog/planfragment.h"
 #include "catalog/statement.h"
 #include "executors/abstractexecutor.h"
-#include "plannodes/abstractplannode.h"
-#include "plannodes/abstractplannode.h"
 #include "executors/executorfactory.h"
-
-#include "boost/foreach.hpp"
 
 namespace voltdb {
 
@@ -169,7 +165,7 @@ void ExecutorVector::initPlanNode(VoltDBEngine* engine, AbstractPlanNode* node) 
     }
 
     // Now use the plannode to initialize the executor for execution later on
-    if (executor->init(engine, &m_limits)) {
+    if (executor->init(engine, *this)) {
         return;
     }
 
@@ -181,8 +177,9 @@ void ExecutorVector::initPlanNode(VoltDBEngine* engine, AbstractPlanNode* node) 
     throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION, msg);
 }
 
-void ExecutorVector::setupContext(ExecutorContext* executorContext)
-    { executorContext->setupForExecutors(&m_subplanExecListMap); }
+void ExecutorVector::setupContext(ExecutorContext* executorContext) {
+    executorContext->setupForExecutors(&m_subplanExecListMap);
+}
 
 void ExecutorVector::resetLimitStats() { m_limits.resetPeakMemory(); }
 

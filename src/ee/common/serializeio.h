@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -354,7 +354,7 @@ public:
         int32_t stringLength = static_cast<int32_t>(length);
         assureExpand(length + sizeof(stringLength));
 
-        // do a newtork order conversion
+        // do a network order conversion
         int32_t networkOrderLen = htonl(stringLength);
 
         char* current = buffer_ + position_;

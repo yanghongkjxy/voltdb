@@ -27,7 +27,7 @@ SERVERS="localhost"
 
 # remove build artifacts
 function clean() {
-    rm -rf voltdbroot log $APPNAME.jar client/com/*.class src/com/procedures/*.class
+    rm -rf voltdbroot log $APPNAME-procs.jar $APPNAME-client.jar client/com/*.class src/com/procedures/*.class
 }
 
 # compile the source code for procedures and the client into jarfiles
@@ -50,8 +50,9 @@ function jars-ifneeded() {
 
 # run the voltdb server locally
 function server() {
-    # note: "create --force" will delete any existing data
-    voltdb create --force -H $STARTUPLEADERHOST
+    # note: "init --force" will delete any existing data
+    voltdb init --force
+    voltdb start -H $STARTUPLEADERHOST
 }
 
 # load schema and procedures
@@ -63,7 +64,7 @@ function init() {
 # run the client that drives the example
 function client() {
     jars-ifneeded
-    java -classpath $APPNAME-client.jar:$APPCLASSPATH MyTPCC \
+    java -classpath $APPNAME-client.jar:$APPNAME-procs.jar:$APPCLASSPATH com.MyTPCC \
         --servers=localhost \
         --duration=180 \
         --warehouses=256 \

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -101,7 +101,7 @@ public class HSQLInterface {
 
     }
 
-    Session sessionProxy;
+    private Session sessionProxy;
     // Keep track of the previous XML for each table in the schema
     Map<String, VoltXMLElement> lastSchema = new TreeMap<>();
     // empty schema for cloning and for null diffs
@@ -124,12 +124,26 @@ public class HSQLInterface {
     }
 
     /**
+     * This class lets HSQL inform VoltDB of the number of parameters
+     * in the current statement, without directly referencing any VoltDB
+     * classes.
+     *
+     * Any additional parameters introduced after HSQL parsing (such as
+     * for subqueries with outer references or paramterization of ad hoc
+     * queries) will need to come after parameters created by HSQL.
+     */
+    public static abstract interface ParameterStateManager {
+        public int getNextParamIndex();
+        public void resetCurrentParamIndex();
+    }
+
+    /**
      * Load up an HSQLDB in-memory instance.
      *
      * @return A newly initialized in-memory HSQLDB instance accessible
      * through the returned instance of HSQLInterface
      */
-    public static HSQLInterface loadHsqldb() {
+    public static HSQLInterface loadHsqldb(ParameterStateManager psMgr) {
         // Specifically set the timezone to UTC to avoid the default usage local timezone in HSQL.
         // This ensures that all VoltDB data paths use the same timezone for representing time.
         TimeZone.setDefault(TimeZone.getTimeZone("GMT+0"));
@@ -142,7 +156,7 @@ public class HSQLInterface {
             Session sessionProxy = DatabaseManager.newSession(DatabaseURL.S_MEM, name, "SA", "", props, 0);
             // make HSQL case insensitive
             sessionProxy.executeDirectStatement("SET IGNORECASE TRUE;");
-
+            sessionProxy.setParameterStateManager(psMgr);
             return new HSQLInterface(sessionProxy);
         }
         catch (HsqlException caught) {
@@ -275,6 +289,7 @@ public class HSQLInterface {
      * encountered.
      */
     public void runDDLCommand(String ddl) throws HSQLParseException {
+        sessionProxy.clearLocalTables();
         Result result = sessionProxy.executeDirectStatement(ddl);
         if (result.hasError()) {
             throw new HSQLParseException(result.getMainString());
@@ -316,6 +331,7 @@ public class HSQLInterface {
     public VoltXMLElement getXMLCompiledStatement(String sql) throws HSQLParseException
     {
         Statement cs = null;
+        sessionProxy.clearLocalTables();
         // clear the expression node id set for determinism
         sessionProxy.resetVoltNodeIds();
 
@@ -374,7 +390,7 @@ public class HSQLInterface {
                  */
                 m_logger.debug(String.format("SQL: %s\n", sql));;
                 m_logger.debug(String.format("HSQLDB:\n%s", (cs == null) ? "<NULL>" : cs.describe(sessionProxy)));
-                m_logger.debug(String.format("VOLTDB:\n%s", (xml == null) ? "<NULL>" : xml));
+                m_logger.debug(String.format("VOLTDB:\n%s", (xml == null) ? "<NULL>" : xml.toXML()));
             }
             catch (Exception caught) {
                 m_logger.warn("Unexpected error in the SQL parser",

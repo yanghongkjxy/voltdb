@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -55,23 +55,36 @@ namespace voltdb
 {
     class AggregateExecutorBase;
     struct CountingPostfilter;
+    class InsertExecutor;
 
     class SeqScanExecutor : public AbstractExecutor {
     public:
         SeqScanExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node)
             : AbstractExecutor(engine, abstract_node)
             , m_aggExec(NULL)
+            , m_insertExec(NULL)
         {}
     protected:
         bool p_init(AbstractPlanNode* abstract_node,
-                    TempTableLimits* limits);
+                    const ExecutorVector& executorVector);
         bool p_execute(const NValueArray& params);
 
     private:
+        /**
+         * Output a tuple.  This may send the tuple to an
+         * inline insert or aggregate node, or it may send the
+         * tuple to the output table.
+         */
+        void outputTuple(TableTuple& tuple);
 
-        void outputTuple(CountingPostfilter& postfilter, TableTuple& tuple);
-
+        // These are logically local variables to p_execute.
+        // But we need to share them between p_execute and
+        // outputTuple, so we save them here.  They come out of
+        // the plan node anyway, so their lifetime is managed
+        // by the plan node.  We don't need to worry about
+        // freeing them.
         AggregateExecutorBase* m_aggExec;
+        InsertExecutor* m_insertExec;
     };
 }
 

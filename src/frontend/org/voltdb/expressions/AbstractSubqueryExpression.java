@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -26,7 +26,7 @@ import org.json_voltpatches.JSONObject;
 import org.json_voltpatches.JSONStringer;
 import org.voltdb.VoltType;
 import org.voltdb.catalog.Database;
-import org.voltdb.planner.AbstractParsedStmt;
+import org.voltdb.planner.ParameterizationInfo;
 import org.voltdb.plannodes.AbstractPlanNode;
 
 /**
@@ -89,7 +89,7 @@ public abstract class AbstractSubqueryExpression extends AbstractExpression {
     // Create a matching PVE for this expression to be used on the EE side
     // to get the original expression value
     protected void addCorrelationParameterValueExpression(AbstractExpression expr, List<AbstractExpression> pves) {
-        int paramIdx = AbstractParsedStmt.NEXT_PARAMETER_ID++;
+        int paramIdx = ParameterizationInfo.getNextParamIndex();
         m_parameterIdxList.add(paramIdx);
         ParameterValueExpression pve = new ParameterValueExpression(paramIdx, expr);
         pves.add(pve);

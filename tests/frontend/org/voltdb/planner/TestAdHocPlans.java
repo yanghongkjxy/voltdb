@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -62,7 +62,7 @@ public class TestAdHocPlans extends AdHocQueryTester {
         DbSettings dbSettings = new DbSettings(
                 config.asClusterSettings().asSupplier(),
                 NodeSettings.create(config.asPathSettingsMap()));
-        CatalogContext context = new CatalogContext(0, 0, catalog, dbSettings, bytes, null, new byte[] {}, 0, mock(HostMessenger.class));
+        CatalogContext context = new CatalogContext(catalog, dbSettings, 0, 0, bytes, null, new byte[] {}, mock(HostMessenger.class));
         m_pt = new PlannerTool(context.database, context.getCatalogHash());
     }
 
@@ -79,9 +79,11 @@ public class TestAdHocPlans extends AdHocQueryTester {
         runQueryTest(sql, 1, 1, 1, VALIDATING_SP_RESULT);
 
         // generate query with lots of predicate to simulate stack overflow when parsing the expression
-        sql = getQueryForLongQueryTable(2000);
         try {
-            runQueryTest(sql, 1, 1, 1, VALIDATING_SP_RESULT);
+            for (int numberPredicates = 2000; numberPredicates < 100000; numberPredicates += 1000) {
+                sql = getQueryForLongQueryTable(numberPredicates);
+                runQueryTest(sql, 1, 1, 1, VALIDATING_SP_RESULT);
+            }
             fail("Query was expected to generate stack over flow error");
         }
         catch (StackOverflowError error) {

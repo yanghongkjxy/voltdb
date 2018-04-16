@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -37,8 +37,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
-import junit.framework.TestCase;
-
 import org.json_voltpatches.JSONException;
 import org.json_voltpatches.JSONObject;
 import org.junit.Test;
@@ -49,7 +47,6 @@ import org.voltcore.utils.CoreUtils;
 import org.voltcore.zk.MapCache;
 import org.voltdb.ClientResponseImpl;
 import org.voltdb.CommandLog;
-import org.voltdb.Consistency;
 import org.voltdb.ParameterSet;
 import org.voltdb.ProcedureRunner;
 import org.voltdb.SnapshotCompletionMonitor;
@@ -63,6 +60,8 @@ import org.voltdb.messaging.Iv2InitiateTaskMessage;
 
 import com.google_voltpatches.common.collect.ImmutableMap;
 
+import junit.framework.TestCase;
+
 public class TestSpSchedulerDedupe extends TestCase
 {
     Mailbox mbox;
@@ -71,14 +70,14 @@ public class TestSpSchedulerDedupe extends TestCase
     VoltDBInterface vdbi;
     ProcedureRunner runner;
     Scheduler dut;
-    Consistency.ReadLevel m_readLevel = Consistency.ReadLevel.SAFE;
 
     static final String MockSPName = "MOCKSP";
     static final long dut_hsid = 11223344l;
 
     private static SiteTaskerQueue getSiteTaskerQueue() {
-        SiteTaskerQueue queue = new SiteTaskerQueue();
+        SiteTaskerQueue queue = new SiteTaskerQueue(0);
         queue.setStarvationTracker(new StarvationTracker(0));
+        queue.setupQueueDepthTracker(0);
         return queue;
     }
 
@@ -103,8 +102,6 @@ public class TestSpSchedulerDedupe extends TestCase
         dut.setMailbox(mbox);
         dut.setCommandLog(cl);
         dut.setLock(mbox);
-
-        ((SpScheduler)dut).setConsistentReadLevelForTestOnly(m_readLevel);
     }
 
     private Iv2InitiateTaskMessage createMsg(long txnId, boolean readOnly,
@@ -168,9 +165,6 @@ public class TestSpSchedulerDedupe extends TestCase
     @Test
     public void testReplicaInitiateTaskResponseShortCircuitRead() throws Exception
     {
-        // replica does not receive reads on SAFE mode, except for FAST mode
-        m_readLevel = Consistency.ReadLevel.FAST;
-
         long txnid = TxnEgo.makeZero(0).getTxnId();
 
         createObjs();
@@ -183,8 +177,6 @@ public class TestSpSchedulerDedupe extends TestCase
         InitiateResponseMessage resp = new InitiateResponseMessage(sptask);
         dut.deliver(resp);
         verify(mbox, times(1)).send(eq(dut_hsid), eq(resp));
-
-        m_readLevel = Consistency.ReadLevel.SAFE;
     }
 
     @Test

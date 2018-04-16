@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -45,17 +45,9 @@
 
 #include "indexscanexecutor.h"
 
-#include "common/debuglog.h"
-#include "common/common.h"
-#include "common/tabletuple.h"
-#include "common/FatalException.hpp"
-#include "common/ValueFactory.hpp"
 #include "executors/aggregateexecutor.h"
-#include "executors/executorutil.h"
-#include "execution/ProgressMonitorProxy.h"
-#include "expressions/abstractexpression.h"
+#include "executors/insertexecutor.h"
 #include "expressions/expressionutil.h"
-#include "indexes/tableindex.h"
 
 // Inline PlanNodes
 #include "plannodes/indexscannode.h"
@@ -63,17 +55,13 @@
 #include "plannodes/limitnode.h"
 #include "plannodes/aggregatenode.h"
 
-#include "storage/table.h"
 #include "storage/tableiterator.h"
-#include "storage/temptable.h"
 #include "storage/persistenttable.h"
 
 using namespace voltdb;
-using std::cout;
-using std::endl;
 
 bool IndexScanExecutor::p_init(AbstractPlanNode *abstractNode,
-        TempTableLimits* limits)
+                               const ExecutorVector& executorVector)
 {
     VOLT_TRACE("init IndexScan Executor");
 
@@ -83,23 +71,36 @@ bool IndexScanExecutor::p_init(AbstractPlanNode *abstractNode,
     assert(m_node);
     assert(m_node->getTargetTable());
 
-    // Create output table based on output schema from the plan
-    setTempOutputTable(limits, m_node->getTargetTable()->name());
+    // Inline aggregation can be serial, partial or hash
+    m_aggExec = voltdb::getInlineAggregateExecutor(m_abstractNode);
+    m_insertExec = voltdb::getInlineInsertExecutor(m_abstractNode);
+    // If we have an inline insert node, then the output
+    // schema is the ususal DML schema.  Otherwise it's in the
+    // plan node.  So, create output table based on output schema from the plan.
+    if (m_insertExec != NULL) {
+        setDMLCountOutputTable(executorVector.limits());
+    } else {
+        setTempOutputTable(executorVector, m_node->getTargetTable()->name());
+    }
 
     //
     // INLINE PROJECTION
     //
-    if (m_node->getInlinePlanNode(PLAN_NODE_TYPE_PROJECTION) != NULL) {
-        m_projectionNode = static_cast<ProjectionPlanNode*>
+    m_projectionNode = static_cast<ProjectionPlanNode*>
             (m_node->getInlinePlanNode(PLAN_NODE_TYPE_PROJECTION));
-
+    //
+    // Optimize the projection if we can.
+    //
+    if (m_projectionNode != NULL) {
         m_projector = OptimizedProjector(m_projectionNode->getOutputColumnExpressions());
         m_projector.optimize(m_projectionNode->getOutputTable()->schema(),
                              m_node->getTargetTable()->schema());
     }
 
-    // Inline aggregation can be serial, partial or hash
-    m_aggExec = voltdb::getInlineAggregateExecutor(m_abstractNode);
+    // For the moment we will not produce a plan with both an
+    // inline aggregate and an inline insert node.  This just
+    // confuses things.
+    assert(m_aggExec == NULL || m_insertExec == NULL);
 
     //
     // Make sure that we have search keys and that they're not null
@@ -123,7 +124,7 @@ bool IndexScanExecutor::p_init(AbstractPlanNode *abstractNode,
     }
 
     //output table should be temptable
-    m_outputTable = static_cast<TempTable*>(m_node->getOutputTable());
+    m_outputTable = static_cast<AbstractTempTable*>(m_node->getOutputTable());
 
     // The target table should be a persistent table.
     PersistentTable* targetTable = dynamic_cast<PersistentTable*>(m_node->getTargetTable());
@@ -140,6 +141,8 @@ bool IndexScanExecutor::p_init(AbstractPlanNode *abstractNode,
     //
     m_lookupType = m_node->getLookupType();
     m_sortDirection = m_node->getSortDirection();
+
+    m_hasOffsetRankOptimization = m_node->hasOffsetRankOptimization();
 
     VOLT_DEBUG("IndexScan: %s.%s\n", targetTable->name().c_str(), tableIndex->getName().c_str());
 
@@ -188,16 +191,73 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
     }
 
     // Initialize the postfilter
-    CountingPostfilter postfilter(m_outputTable, post_expression, limit, offset);
+    int postfilterOffset = offset;
+    if (m_hasOffsetRankOptimization) {
+        postfilterOffset = CountingPostfilter::NO_OFFSET;
+    }
+    CountingPostfilter postfilter(m_outputTable, post_expression, limit, postfilterOffset);
 
-    TableTuple temp_tuple;
+    // Progress monitor
     ProgressMonitorProxy pmp(m_engine->getExecutorContext(), this);
-    if (m_aggExec != NULL) {
-        const TupleSchema * inputSchema = tableIndex->getTupleSchema();
+
+    //
+    // Set the temp_tuple.  The data flow is:
+    //
+    //  scannedTable -+-> inline Project -+-> inline Node -+-> outputTable
+    //                |                   ^                ^
+    //                |                   |                |
+    //                V                   V                |
+    //                +-------------------+----------------+
+    // A tuple comes out of the scanned table, through the inline Project if
+    // there is one, through the inline Node, aggregate or insert, if there
+    // is one and into the output table.  The scanned table and the
+    // output table have their schemas and we can get a temp tuple from
+    // them if we need it.  The middle node, between the inline project
+    // and the inline Node, doesn't have a table.  So, in this case,
+    // we need to create a tuple with the appropriate schema.  This
+    // will be the output schema of the inline project node.  The tuple
+    // temp_tuple is exactly this tuple.
+    //
+    TableTuple temp_tuple;
+
+    if (m_aggExec != NULL || m_insertExec != NULL) {
+        const TupleSchema * temp_tuple_schema;
         if (m_projectionNode != NULL) {
-            inputSchema = m_projectionNode->getOutputTable()->schema();
+            temp_tuple_schema = m_projectionNode->getOutputTable()->schema();
+        } else {
+            temp_tuple_schema = tableIndex->getTupleSchema();
         }
-        temp_tuple = m_aggExec->p_execute_init(params, &pmp, inputSchema, m_outputTable, &postfilter);
+        if (m_aggExec != NULL) {
+            temp_tuple = m_aggExec->p_execute_init(params, &pmp, temp_tuple_schema, m_outputTable, &postfilter);
+        } else {
+            // We may actually find out during initialization
+            // that we are done.  The p_execute_init function
+            // returns false if this is so.  See the definition
+            // of InsertExecutor::p_execute_init.
+            //
+            // We know we're in an insert from select statement.
+            // The temp_tuple has as its schema the
+            // set of columns of the select statement.
+            // This is in the input schema.  We don't
+            // actually have a tuple with this schema
+            // yet, because we don't have an output
+            // table for the projection node.  That's
+            // the reason for the inline insert node,
+            // after all.  So we have to construct a
+            // tuple which the inline insert will be
+            // happy with.  The p_execute_init knows
+            // how to do this.  Note that temp_tuple will
+            // not be initialized if this returns false.
+            if (!m_insertExec->p_execute_init(temp_tuple_schema, m_tmpOutputTable, temp_tuple)) {
+                return true;
+            }
+            // We should have as many expressions in the
+            // projection node as there are columns in the
+            // input schema if there is an inline projection.
+            assert(m_projectionNode != NULL
+                       ? (temp_tuple.getSchema()->columnCount() == m_projectionNode->getOutputColumnExpressions().size())
+                       : true);
+        }
     } else {
         temp_tuple = m_outputTable->tempTuple();
     }
@@ -207,6 +267,8 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
         VOLT_DEBUG ("Empty Index Scan :\n %s", m_outputTable->debug().c_str());
         if (m_aggExec != NULL) {
             m_aggExec->p_execute_finish();
+        } else if (m_insertExec != NULL) {
+            m_insertExec->p_execute_finish();
         }
         return true;
     }
@@ -239,9 +301,15 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
             // setting up the search keys.
             // e.g. TINYINT > 200 or INT <= 6000000000
             // VarChar(3 bytes) < "abcd" or VarChar(3) > "abbd"
-
+            //
+            // Shouldn't this all be the same as the code in indexcountexecutor?
+            // Here the localLookupType can only be NE, EQ, GT or GTE, and never LT
+            // or LTE.  But that seems like something a template could puzzle out.
+            //
             // re-throw if not an overflow, underflow or variable length mismatch
             // currently, it's expected to always be an overflow or underflow
+            //
+            // Note that only one if these three bits will ever be asserted (cf. below).
             if ((e.getInternalFlags() & (SQLException::TYPE_OVERFLOW | SQLException::TYPE_UNDERFLOW | SQLException::TYPE_VAR_LENGTH_MISMATCH)) == 0) {
                 throw e;
             }
@@ -252,6 +320,11 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
             if ((localLookupType != INDEX_LOOKUP_TYPE_EQ) &&
                     (ctr == (activeNumOfSearchKeys - 1))) {
 
+                // We have three cases, one for overflow, one for underflow
+                // and one for TYPE_VAR_LENGTH_MISMATCH.  These are
+                // orthogonal here, though it's not clearly so.  See the
+                // definitions of throwCastSQLValueOutOfRangeException,
+                // whence these all come.
                 if (e.getInternalFlags() & SQLException::TYPE_OVERFLOW) {
                     if ((localLookupType == INDEX_LOOKUP_TYPE_GT) ||
                             (localLookupType == INDEX_LOOKUP_TYPE_GTE)) {
@@ -330,6 +403,9 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
     if (earlyReturnForSearchKeyOutOfRange) {
         if (m_aggExec != NULL) {
             m_aggExec->p_execute_finish();
+        }
+        if (m_insertExec != NULL) {
+            m_insertExec->p_execute_finish();
         }
         return true;
     }
@@ -418,14 +494,25 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
         else {
             return false;
         }
-    }
-    else {
-        bool toStartActually = (localSortDirection != SORT_DIRECTION_TYPE_DESC);
-        tableIndex->moveToEnd(toStartActually, indexCursor);
+    } else {
+        bool forward = (localSortDirection != SORT_DIRECTION_TYPE_DESC);
+        if (m_hasOffsetRankOptimization) {
+            int rankOffset = offset + 1;
+            if (!forward) {
+                rankOffset = static_cast<int>(tableIndex->getSize() - offset);
+            }
+            // when rankOffset is not greater than 0, it means there are no matching tuples
+            // then we do not need to update the IndexCursor which points to NULL tuple by default
+            if (rankOffset > 0) {
+                tableIndex->moveToRankTuple(rankOffset, forward, indexCursor);
+            }
+        } else {
+            tableIndex->moveToEnd(forward, indexCursor);
+        }
     }
 
     //
-    // We have to different nextValue() methods for different lookup types
+    // We have different nextValue() methods for different lookup types
     //
     while (postfilter.isUnderLimit() &&
            getNextTuple(localLookupType,
@@ -476,6 +563,9 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
     if (m_aggExec != NULL) {
         m_aggExec->p_execute_finish();
     }
+    else if (m_insertExec != NULL) {
+        m_insertExec->p_execute_finish();
+    }
 
 
     VOLT_DEBUG ("Index Scanned :\n %s", m_outputTable->debug().c_str());
@@ -485,6 +575,10 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
 void IndexScanExecutor::outputTuple(CountingPostfilter& postfilter, TableTuple& tuple) {
     if (m_aggExec != NULL) {
         m_aggExec->p_execute_tuple(tuple);
+        return;
+    }
+    else if (m_insertExec != NULL) {
+        m_insertExec->p_execute_tuple(tuple);
         return;
     }
     //

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -31,24 +31,24 @@ import java.util.Random;
 
 import org.voltcore.logging.VoltLogger;
 import org.voltdb.ServerThread;
+import org.voltdb.TheHashinator;
 import org.voltdb.VoltDB;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
+import org.voltdb.client.ClientConfig;
 import org.voltdb.client.ClientFactory;
 import org.voltdb.client.ClientResponse;
 import org.voltdb.client.VoltBulkLoader.BulkLoaderFailureCallBack;
 import org.voltdb.client.VoltBulkLoader.VoltBulkLoader;
 import org.voltdb.common.Constants;
 import org.voltdb.compiler.VoltProjectBuilder;
-import org.voltdb.types.GeographyPointValue;
-import org.voltdb.types.GeographyValue;
 import org.voltdb.types.TimestampType;
 
 import junit.framework.TestCase;
 
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -1090,7 +1090,7 @@ public class TestVoltBulkLoader extends TestCase {
 
             // Call validate partitioning to check if we are good.
             VoltTable valTable;
-            valTable = client1.callProcedure("@ValidatePartitioning", null, null).getResults()[0];
+            valTable = client1.callProcedure("@ValidatePartitioning", (Object)null).getResults()[0];
             System.out.println("Validate for BLAH:\n" + valTable);
             while (valTable.advanceRow()) {
                 long miscnt = valTable.getLong("MISPARTITIONED_ROWS");
@@ -1160,36 +1160,15 @@ public class TestVoltBulkLoader extends TestCase {
             String my_tableName1, Object[][] my_data1, int my_batchSize1, ArrayList<Integer> expectedFailList1, boolean abort1, boolean upsert1,
             String my_tableName2, Object[][] my_data2, int my_batchSize2, ArrayList<Integer> expectedFailList2, boolean abort2, boolean upsert2) throws Exception {
         try{
-            pathToCatalog = Configuration.getPathToCatalogForTest("vbl.jar");
-            pathToDeployment = Configuration.getPathToCatalogForTest("vbl.xml");
-            builder = new VoltProjectBuilder();
-
-            builder.addLiteralSchema(my_schema);
-            boolean sameTable = my_tableName1.equals(my_tableName2);
             assert(!(abort1 && abort2));
             if (abort1 || abort2)
                 // No point in testing abort with a single loader
                 assert(multipleLoaders);
 
-            if (!multiPartTable) {
-                builder.addPartitionInfo(my_tableName1, "clm_integer");
-                if (!sameTable)
-                    builder.addPartitionInfo(my_tableName2, "clm_integer");
-            }
-            boolean success = builder.compile(pathToCatalog, 2, 1, 0);
-            assertTrue(success);
-            MiscUtils.copyFile(builder.getPathToDeployment(), pathToDeployment);
-            config = new VoltDB.Configuration();
-            config.m_pathToCatalog = pathToCatalog;
-            config.m_pathToDeployment = pathToDeployment;
-            localServer = new ServerThread(config);
+            boolean sameTable = startServer(my_schema, multiPartTable, my_tableName1, my_tableName2);
+
             client1 = null;
             client2 = null;
-
-            localServer.start();
-            localServer.waitForInitialization();
-
-
             client1 = ClientFactory.createClient();
             client1.createConnection("localhost");
             if (multipleClients) {
@@ -1225,7 +1204,7 @@ public class TestVoltBulkLoader extends TestCase {
 
             // Call validate partitioning to check if we are good.
             VoltTable valTable1;
-            valTable1 = client1.callProcedure("@ValidatePartitioning", null, null).getResults()[0];
+            valTable1 = client1.callProcedure("@ValidatePartitioning", (Object)null).getResults()[0];
             System.out.println("Validate for " + my_tableName1 + ":\n" + valTable1);
             while (valTable1.advanceRow()) {
                 long miscnt = valTable1.getLong("MISPARTITIONED_ROWS");
@@ -1239,7 +1218,7 @@ public class TestVoltBulkLoader extends TestCase {
 
                 // Call validate partitioning to check if we are good.
                 VoltTable valTable2;
-                valTable2 = client2.callProcedure("@ValidatePartitioning", null, null).getResults()[0];
+                valTable2 = client2.callProcedure("@ValidatePartitioning", (Object)null).getResults()[0];
                 System.out.println("Validate for " + my_tableName1 + ":\n" + valTable2);
                 while (valTable2.advanceRow()) {
                     long miscnt = valTable2.getLong("MISPARTITIONED_ROWS");
@@ -1311,6 +1290,106 @@ public class TestVoltBulkLoader extends TestCase {
 
             // no clue how helpful this is
             System.gc();
+        }
+    }
+
+    private boolean startServer(String my_schema, boolean multiPartTable, String my_tableName1, String my_tableName2) throws Exception
+    {
+        pathToCatalog = Configuration.getPathToCatalogForTest("vbl.jar");
+        pathToDeployment = Configuration.getPathToCatalogForTest("vbl.xml");
+        builder = new VoltProjectBuilder();
+
+        builder.addLiteralSchema(my_schema);
+        boolean sameTable = my_tableName1.equals(my_tableName2);
+
+        if (!multiPartTable) {
+            builder.addPartitionInfo(my_tableName1, "clm_integer");
+            if (!sameTable)
+                builder.addPartitionInfo(my_tableName2, "clm_integer");
+        }
+        boolean success = builder.compile(pathToCatalog, 2, 1, 0);
+        assertTrue(success);
+        MiscUtils.copyFile(builder.getPathToDeployment(), pathToDeployment);
+        config = new Configuration();
+        config.m_pathToCatalog = pathToCatalog;
+        config.m_pathToDeployment = pathToDeployment;
+        localServer = new ServerThread(config);
+
+        localServer.start();
+        localServer.waitForInitialization();
+        return sameTable;
+    }
+
+    // ENG-11823
+    public void testConcurrentLoaders() throws Exception {
+        startServer("create table test1 (c1 int);", true, "test1", "test1");
+
+        int threadNum = 2;
+        ClientConfig config = new ClientConfig();
+        Client client = ClientFactory.createClient(config);
+        VoltBulkLoader[] bulkLoaders = new VoltBulkLoader[threadNum];
+        try {
+            client.createConnection("localhost");
+
+            Thread[] threads = new Thread[threadNum];
+            for (int i = 0; i < threadNum; i++) {
+                bulkLoaders[i] = client.getNewBulkLoader("test1", 50, new BulkLoaderFailureCallBack() {
+
+                    @Override
+                    public void failureCallback(Object arg0, Object[] arg1, ClientResponse arg2)
+                    {
+                        System.out.println("Insert failed: " + arg0);
+                    }
+
+                });
+                Runnable runnable = new MyRunnable(bulkLoaders[i]);
+                threads[i] = new Thread(runnable, "loaderThread-" + i);
+                threads[i].start();
+            }
+
+            for (int i = 0; i < threadNum; i++) {
+                threads[i].join();
+            }
+
+        } finally {
+            for (int i = 0; i < threadNum; i++) {
+                bulkLoaders[i].close();
+            }
+            client.close();
+
+            if (localServer != null) {
+                localServer.shutdown();
+                localServer.join();
+            }
+            localServer = null;
+        }
+    }
+
+    static class MyRunnable implements Runnable {
+        private VoltBulkLoader loader;
+        private Random random;
+
+        public MyRunnable(VoltBulkLoader loader) {
+            this.loader = loader;
+            this.random = new Random();
+        }
+
+        @Override
+        public void run() {
+            try {
+                for (int i = 0; i < 1000; i++) {
+                    for (int j = 0; j < 50; j++) {
+                        int obj = random.nextInt();
+                        loader.insertRow(obj, obj);
+                    }
+                    loader.drain();
+                    Thread.sleep(5 + Math.abs(random.nextInt()) % 5);
+                }
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            System.out.println(Thread.currentThread().getName() + " finish.");
         }
     }
 }

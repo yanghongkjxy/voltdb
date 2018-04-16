@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -217,7 +217,7 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode implements I
 
         // Resolve TVE indexes for each schema column.
         for (int i = 0; i < m_outputSchemaPreInlineAgg.size(); ++i) {
-            SchemaColumn col = m_outputSchemaPreInlineAgg.getColumns().get(i);
+            SchemaColumn col = m_outputSchemaPreInlineAgg.getColumn(i);
 
             // These will all be TVEs.
             assert(col.getExpression() instanceof TupleValueExpression);
@@ -307,8 +307,9 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode implements I
         if (m_outputSchemaPreInlineAgg != m_outputSchema) {
             stringer.key(Members.OUTPUT_SCHEMA_PRE_AGG.name());
             stringer.array();
-            for (SchemaColumn column : m_outputSchemaPreInlineAgg.getColumns()) {
-                column.toJSONString(stringer, true);
+            for (int colNo = 0; colNo < m_outputSchemaPreInlineAgg.size(); colNo += 1) {
+                SchemaColumn column = m_outputSchemaPreInlineAgg.getColumn(colNo);
+                column.toJSONString(stringer, true, colNo);
             }
             stringer.endArray();
         }

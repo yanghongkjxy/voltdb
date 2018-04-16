@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -31,10 +31,9 @@ import java.util.Arrays;
 
 import org.mockito.Mockito;
 import org.voltcore.logging.VoltLogger;
-import org.voltdb.LegacyHashinator;
+import org.voltdb.ElasticHashinator;
 import org.voltdb.ParameterSet;
 import org.voltdb.TheHashinator.HashinatorConfig;
-import org.voltdb.TheHashinator.HashinatorType;
 import org.voltdb.VoltDB;
 import org.voltdb.VoltTable;
 import org.voltdb.VoltType;
@@ -47,7 +46,7 @@ import org.voltdb.catalog.Procedure;
 import org.voltdb.catalog.Statement;
 import org.voltdb.planner.ActivePlanRepository;
 import org.voltdb.utils.CatalogUtil;
-import org.voltdb.utils.Encoder;
+import org.voltdb.utils.CompressionService;
 
 import junit.framework.TestCase;
 
@@ -123,7 +122,7 @@ public class TestFragmentProgressUpdate extends TestCase {
         ActivePlanRepository.clear();
         ActivePlanRepository.addFragmentForTest(
                 CatalogUtil.getUniqueIdForFragment(selectBottomFrag),
-                Encoder.decodeBase64AndDecompressToBytes(selectBottomFrag.getPlannodetree()),
+                CompressionService.decodeBase64AndDecompressToBytes(selectBottomFrag.getPlannodetree()),
                 selectStmt.getSqltext());
         ParameterSet params = ParameterSet.emptyParameterSet();
 
@@ -179,7 +178,7 @@ public class TestFragmentProgressUpdate extends TestCase {
         ActivePlanRepository.clear();
         ActivePlanRepository.addFragmentForTest(
                 CatalogUtil.getUniqueIdForFragment(selectBottomFrag),
-                Encoder.decodeBase64AndDecompressToBytes(selectBottomFrag.getPlannodetree()),
+                CompressionService.decodeBase64AndDecompressToBytes(selectBottomFrag.getPlannodetree()),
                 selectStmt.getSqltext());
         ParameterSet params = ParameterSet.emptyParameterSet();
 
@@ -219,7 +218,7 @@ public class TestFragmentProgressUpdate extends TestCase {
         ActivePlanRepository.clear();
         ActivePlanRepository.addFragmentForTest(
                 CatalogUtil.getUniqueIdForFragment(deleteBottomFrag),
-                Encoder.decodeBase64AndDecompressToBytes(deleteBottomFrag.getPlannodetree()),
+                CompressionService.decodeBase64AndDecompressToBytes(deleteBottomFrag.getPlannodetree()),
                 deleteStmt.getSqltext());
         params = ParameterSet.emptyParameterSet();
         m_ee.executePlanFragments(
@@ -237,7 +236,7 @@ public class TestFragmentProgressUpdate extends TestCase {
         ActivePlanRepository.clear();
         ActivePlanRepository.addFragmentForTest(
                 CatalogUtil.getUniqueIdForFragment(selectBottomFrag),
-                Encoder.decodeBase64AndDecompressToBytes(selectBottomFrag.getPlannodetree()),
+                CompressionService.decodeBase64AndDecompressToBytes(selectBottomFrag.getPlannodetree()),
                 selectStmt.getSqltext());
         params = ParameterSet.emptyParameterSet();
         m_ee.executePlanFragments(
@@ -294,7 +293,7 @@ public class TestFragmentProgressUpdate extends TestCase {
         ActivePlanRepository.clear();
         ActivePlanRepository.addFragmentForTest(
                 CatalogUtil.getUniqueIdForFragment(selectBottomFrag),
-                Encoder.decodeBase64AndDecompressToBytes(selectBottomFrag.getPlannodetree()),
+                CompressionService.decodeBase64AndDecompressToBytes(selectBottomFrag.getPlannodetree()),
                 selectStmt.getSqltext());
         ParameterSet params = ParameterSet.emptyParameterSet();
 
@@ -369,7 +368,7 @@ public class TestFragmentProgressUpdate extends TestCase {
 
             ActivePlanRepository.addFragmentForTest(
                     fragId,
-                    Encoder.decodeBase64AndDecompressToBytes(frag.getPlannodetree()),
+                    CompressionService.decodeBase64AndDecompressToBytes(frag.getPlannodetree()),
                     sqlText);
         }
 
@@ -612,15 +611,16 @@ public class TestFragmentProgressUpdate extends TestCase {
                 CLUSTER_ID,
                 NODE_ID,
                 0,
+                1,
                 0,
                 "",
                 0,
                 64*1024,
                 100,
-                new HashinatorConfig(HashinatorType.LEGACY,
-                                     LegacyHashinator.getConfigureBytes(1),
+                new HashinatorConfig(ElasticHashinator.getConfigureBytes(1),
                                      0,
-                                     0), false);
+                                     0),
+                true);
     }
 
     @Override

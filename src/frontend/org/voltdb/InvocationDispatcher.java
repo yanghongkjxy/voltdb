@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -24,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -43,7 +44,6 @@ import org.json_voltpatches.JSONObject;
 import org.json_voltpatches.JSONStringer;
 import org.voltcore.logging.Level;
 import org.voltcore.logging.VoltLogger;
-import org.voltcore.messaging.ForeignHost;
 import org.voltcore.messaging.HostMessenger;
 import org.voltcore.messaging.Mailbox;
 import org.voltcore.network.Connection;
@@ -52,7 +52,6 @@ import org.voltcore.utils.EstTime;
 import org.voltcore.utils.RateLimitedLogger;
 import org.voltcore.zk.ZKUtil;
 import org.voltdb.AuthSystem.AuthUser;
-import org.voltdb.Consistency.ReadLevel;
 import org.voltdb.SystemProcedureCatalog.Config;
 import org.voltdb.catalog.CatalogMap;
 import org.voltdb.catalog.Column;
@@ -116,10 +115,16 @@ public final class InvocationDispatcher {
     private final AtomicReference<Map<Integer,Long>> m_localReplicas = new AtomicReference<>(ImmutableMap.of());
     private final SnapshotDaemon m_snapshotDaemon;
     private final AtomicBoolean m_isInitialRestore = new AtomicBoolean(true);
-    // used to decide if we should shortcut reads
-    private final Consistency.ReadLevel m_defaultConsistencyReadLevel;
+    private final VoltTable statusTable = new VoltTable(new VoltTable.ColumnInfo("STATUS", VoltType.BIGINT));
 
     private final NTProcedureService m_NTProcedureService;
+
+    // Next partition to service adhoc replicated table reads
+    private static int m_nextPartition = -1;
+    // Number of partitions, will NOT change when new node joins cluster
+    private static int m_partitionCount;
+    // the partition id list, which does not assume starting from 0
+    private static ArrayList<Integer> m_partitionIds;
 
     public final static class Builder {
 
@@ -130,7 +135,6 @@ public final class InvocationDispatcher {
         Mailbox m_mailbox;
         ReplicationRole m_replicationRole;
         SnapshotDaemon m_snapshotDaemon;
-        long m_plannerSiteId;
         long m_siteId;
 
         public Builder clientInterface(ClientInterface clientInterface) {
@@ -163,11 +167,6 @@ public final class InvocationDispatcher {
             return this;
         }
 
-        public Builder plannerSiteId(long plannerSiteId) {
-            m_plannerSiteId = plannerSiteId;
-            return this;
-        }
-
         public Builder snapshotDaemon(SnapshotDaemon snapshotDaemon) {
             m_snapshotDaemon = checkNotNull(snapshotDaemon,"given snapshot daemon is null");
             return this;
@@ -187,7 +186,6 @@ public final class InvocationDispatcher {
                     m_mailbox,
                     m_snapshotDaemon,
                     m_replicationRole,
-                    m_plannerSiteId,
                     m_siteId
                     );
         }
@@ -205,7 +203,6 @@ public final class InvocationDispatcher {
             Mailbox mailbox,
             SnapshotDaemon snapshotDaemon,
             ReplicationRole replicationRole,
-            long plannerSiteId,
             long siteId)
     {
         m_siteId = siteId;
@@ -218,13 +215,14 @@ public final class InvocationDispatcher {
         m_cartographer = checkNotNull(cartographer, "given cartographer is null");
         m_snapshotDaemon = checkNotNull(snapshotDaemon,"given snapshot daemon is null");
 
-        // try to get the global default setting for read consistency, but fall back to SAFE
-        m_defaultConsistencyReadLevel = VoltDB.Configuration.getDefaultReadConsistencyLevel();
-
         m_NTProcedureService = new NTProcedureService(clientInterface, this, m_mailbox);
+        statusTable.addRow(0);
 
         // this kicks off the initial NT procedures being loaded
         notifyNTProcedureServiceOfCatalogUpdate();
+
+        // update the partition count and partition keys for rounting purpose
+        updatePartitionInformation();
     }
 
     /**
@@ -239,6 +237,27 @@ public final class InvocationDispatcher {
      */
     void notifyNTProcedureServiceOfCatalogUpdate() {
         m_NTProcedureService.update(m_catalogContext.get());
+    }
+
+    LightweightNTClientResponseAdapter getInternelAdapterNT () {
+        return m_NTProcedureService.m_internalNTClientAdapter;
+    }
+
+    static void updatePartitionInformation() {
+        m_partitionIds = new ArrayList<>();
+
+        VoltTable partitionKeys = TheHashinator.getPartitionKeys(VoltType.INTEGER);
+        ByteBuffer buf = ByteBuffer.allocate(partitionKeys.getSerializedSize());
+        partitionKeys.flattenToBuffer(buf);
+        buf.flip();
+        VoltTable keyCopy = PrivateVoltTableFactory.createVoltTableFromSharedBuffer(buf);
+        keyCopy.resetRowPosition();
+        while (keyCopy.advanceRow()) {
+            if (MpInitiator.MP_INIT_PID != keyCopy.getLong("PARTITION_ID")) {
+                m_partitionIds.add((int)(keyCopy.getLong("PARTITION_ID")));
+            }
+        }
+        m_partitionCount = m_partitionIds.size();
     }
 
     /*
@@ -284,6 +303,8 @@ public final class InvocationDispatcher {
         final long nowNanos = System.nanoTime();
                 // Deserialize the client's request and map to a catalog stored procedure
         final CatalogContext catalogContext = m_catalogContext.get();
+
+        String clientInfo = ccxn.getHostnameAndIPAndPort();  // Storing the client's ip information
 
         final String procName = task.getProcName();
         final String threadName = Thread.currentThread().getName(); // Thread name has to be materialized here
@@ -374,7 +395,7 @@ public final class InvocationDispatcher {
             // ping just responds as fast as possible to show the connection is alive
             // nb: ping is not a real procedure, so this is checked before other "sysprocs"
             if ("@Ping".equals(procName)) {
-                return new ClientResponseImpl(ClientResponseImpl.SUCCESS, new VoltTable[0], "", task.clientHandle);
+                return new ClientResponseImpl(ClientResponseImpl.SUCCESS, new VoltTable[]{statusTable}, "SUCCESS", task.clientHandle);
             }
             else if ("@GetPartitionKeys".equals(procName)) {
                 return dispatchGetPartitionKeys(task);
@@ -395,31 +416,12 @@ public final class InvocationDispatcher {
                 return dispatchStatistics(OpsSelector.TRACE, task, ccxn);
             }
             else if ("@StopNode".equals(procName)) {
+                CoreUtils.logProcedureInvocation(hostLog, user.m_name, clientInfo, procName);
                 return dispatchStopNode(task);
             }
             else if ("@LoadSinglepartitionTable".equals(procName)) {
                 // FUTURE: When we get rid of the legacy hashinator, this should go away
                 return dispatchLoadSinglepartitionTable(catProc, task, handler, ccxn);
-            }
-            else if ("@ExecuteTask".equals(procName)) {
-                // ExecuteTask is an internal procedure, not for public use.
-                return unexpectedFailureResponse(
-                        "@ExecuteTask is a reserved procedure only for VoltDB internal use", task.clientHandle);
-            }
-            else if ("@UpdateLogging".equals(procName)) {
-                task = appendAuditParams(task, ccxn, user);
-            }
-
-            // ERROR MESSAGE FOR PRO SYSPROC USE IN COMMUNITY
-
-            if (!MiscUtils.isPro()) {
-                SystemProcedureCatalog.Config sysProcConfig = SystemProcedureCatalog.listing.get(procName);
-                if ((sysProcConfig != null) && (sysProcConfig.commercial)) {
-                    return new ClientResponseImpl(ClientResponseImpl.GRACEFUL_FAILURE,
-                            new VoltTable[0],
-                            procName + " is available in the Enterprise Edition of VoltDB only.",
-                            task.clientHandle);
-                }
             }
             else if ("@SnapshotSave".equals(procName)) {
                 m_snapshotDaemon.requestUserSnapshot(task, ccxn);
@@ -447,30 +449,49 @@ public final class InvocationDispatcher {
                     m_NTProcedureService.isRestoring = true;
                     return useSnapshotCatalogToRestoreSnapshotSchema(task, handler, ccxn, user, bypass);
                 }
-            } else if ("@Shutdown".equals(procName)) {
+            }
+            else if ("@Shutdown".equals(procName)) {
                 if (task.getParams().size() == 1) {
                     return takeShutdownSaveSnapshot(task, handler, ccxn, user, bypass);
+                }
+            }
+            else if ("@UpdateLogging".equals(procName)) {
+                task = appendAuditParams(task, ccxn, user);
+            }
+
+            // ERROR MESSAGE FOR PRO SYSPROC USE IN COMMUNITY
+
+            if (!MiscUtils.isPro()) {
+                SystemProcedureCatalog.Config sysProcConfig = SystemProcedureCatalog.listing.get(procName);
+                if ((sysProcConfig != null) && (sysProcConfig.commercial)) {
+                    return new ClientResponseImpl(ClientResponseImpl.GRACEFUL_FAILURE,
+                            new VoltTable[0],
+                            procName + " is available in the Enterprise Edition of VoltDB only.",
+                            task.clientHandle);
                 }
             }
 
             // Verify that admin mode sysprocs are called from a client on the
             // admin port, otherwise return a failure
-            if ((   "@Pause".equals(procName)
+            if (    "@Pause".equals(procName)
                  || "@Resume".equals(procName)
                  || "@PrepareShutdown".equals(procName))
-               && !handler.isAdmin())
             {
-                return unexpectedFailureResponse(
-                        procName + " is not available to this client",
-                        task.clientHandle);
+                if (handler.isAdmin() == false) {
+                    return unexpectedFailureResponse(
+                            procName + " is not available to this client",
+                            task.clientHandle);
+                }
+                // Log the invocation with user name and ip information
+                CoreUtils.logProcedureInvocation(hostLog, user.m_name, clientInfo, procName);
             }
         }
         // If you're going to copy and paste something, CnP the pattern
         // up above.  -rtb.
 
-        int partition = -1;
+        int[] partitions = null;
         try {
-            partition = getPartitionForProcedure(catProc, task);
+            partitions = getPartitionsForProcedure(catProc, task);
         } catch (Exception e) {
             // unable to hash to a site, return an error
             return getMispartitionedErrorResponse(task, catProc, e);
@@ -480,7 +501,7 @@ public final class InvocationDispatcher {
                         catProc.getReadonly(),
                         catProc.getSinglepartition(),
                         catProc.getEverysite(),
-                        partition,
+                        partitions,
                         task.getSerializedSize(),
                         nowNanos);
         if (!success) {
@@ -663,26 +684,17 @@ public final class InvocationDispatcher {
                     "Invalid Host Id or Host Id not member of cluster: " + ihid,
                     task.clientHandle);
         }
-        if (!m_cartographer.isClusterSafeIfNodeDies(liveHids, ihid)) {
-            hostLog.info("Its unsafe to shutdown node with hostId: " + ihid
-                    + " Cannot stop the requested node. Stopping individual nodes is only allowed on a K-safe cluster."
-                    + " And all rejoin nodes should be completed."
-                    + " Use shutdown to stop the cluster.");
+        String reason = m_cartographer.stopNodeIfClusterIsSafe(liveHids, ihid);
+        if (reason != null) {
+            hostLog.info("It's unsafe to shutdown node " + ihid
+                    + ". Cannot stop the requested node. " + reason
+                    + ". Use shutdown to stop the cluster.");
             return gracefulFailureResponse(
-                    "Cannot stop the requested node. Stopping individual nodes is only allowed on a K-safe cluster."
-                  + " And all rejoin nodes should be completed."
-                  + " Use shutdown to stop the cluster.", task.clientHandle);
+                    "It's unsafe to shutdown node " + ihid
+                  + ". Cannot stop the requested node. " + reason
+                  + ". Use shutdown to stop the cluster.", task.clientHandle);
         }
 
-
-        int hid = hostMessenger.getHostId();
-        if (hid == ihid) {
-            //Killing myself no pill needs to be sent
-            VoltDB.instance().halt();
-        } else {
-            //Send poison pill with target to kill
-            hostMessenger.sendPoisonPill("@StopNode", ihid, ForeignHost.CRASH_ME);
-        }
         return new ClientResponseImpl(ClientResponse.SUCCESS, new VoltTable[0], "SUCCESS", task.clientHandle);
     }
 
@@ -713,24 +725,18 @@ public final class InvocationDispatcher {
                     task.clientHandle);
         }
 
-        // used below, but never really matters
-        final int NTPROC_JUNK_ID = -2;
-
         // This handle is needed for backpressure. It identifies this transaction to the ACG and
         // increments backpressure. When the response is sent (by sending an InitiateResponseMessage
         // to the CI mailbox, the backpressure associated with this handle will go away.
         // Sadly, many of the value's here are junk.
         long handle = cihm.getHandle(true,
-                                     NTPROC_JUNK_ID,
+                                     ClientInterface.NTPROC_JUNK_ID,
                                      task.clientHandle,
                                      task.getSerializedSize(),
                                      nowNanos,
                                      task.getProcName(),
-                                     NTPROC_JUNK_ID,
-                                     true,
-                                     true); // We are using shortcut read here on purpose
-                                            // it's the simplest place to keep the handle because it
-                                            // doesn't do as much work with partitions.
+                                     ClientInterface.NTPROC_JUNK_ID,
+                                     false);
 
         // note, once we get the handle above, any response to the client MUST be done
         // by sending an InitiateResponseMessage to the CI mailbox. Writing bytes to the wire, like we
@@ -817,7 +823,7 @@ public final class InvocationDispatcher {
                           catProc.getReadonly(),
                           catProc.getSinglepartition(),
                           catProc.getEverysite(),
-                          partition,
+                          new int[] { partition },
                           task.getSerializedSize(),
                           System.nanoTime());
         return null;
@@ -862,12 +868,6 @@ public final class InvocationDispatcher {
             final AuthUser user, OverrideCheck bypass
             )
     {
-        // shutdown save snapshot is available for Pro edition only
-        if (!MiscUtils.isPro()) {
-            task.setParams();
-            return dispatch(task, handler, ccxn, user, bypass, false);
-        }
-
         Object p0 = task.getParams().getParam(0);
         final long zkTxnId;
         if (p0 instanceof Long) {
@@ -1017,7 +1017,7 @@ public final class InvocationDispatcher {
         voltdb.getClientInterface().bindAdapter(alternateAdapter, null);
         SnapshotUtil.requestSnapshot(
                 sourceHandle,
-                paths.resolve(paths.getSnapshoth()).toPath().toUri().toString(),
+                paths.resolveToAbsolutePath(paths.getSnapshoth()).toPath().toUri().toString(),
                 SnapshotUtil.getShutdownSaveNonce(zkTxnId),
                 true,
                 SnapshotFormat.NATIVE,
@@ -1037,9 +1037,9 @@ public final class InvocationDispatcher {
                 snapJo.optString(SnapshotUtil.JSON_PATH_TYPE, SnapshotPathType.SNAP_PATH.name()));
         switch(pathType) {
         case SNAP_AUTO:
-            return new File(paths.resolve(paths.getSnapshoth()), catFN);
+            return new File(paths.resolveToAbsolutePath(paths.getSnapshoth()), catFN);
         case SNAP_CL:
-            return new File(paths.resolve(paths.getCommandLogSnapshot()), catFN);
+            return new File(paths.resolveToAbsolutePath(paths.getCommandLogSnapshot()), catFN);
         default:
             File snapDH = new VoltFile(snapJo.getString(SnapshotUtil.JSON_PATH));
             return new File(snapDH, catFN);
@@ -1067,9 +1067,9 @@ public final class InvocationDispatcher {
             try {
                 catalog = MiscUtils.fileToBytes(catalogFH);
             } catch (IOException e) {
-                log.warn("Unable to access catalog file " + catalogFH, e);
+                log.warn("Unable to access file " + catalogFH, e);
                 return unexpectedFailureResponse(
-                        "Unable to access catalog file " + catalogFH,
+                        "Unable to access file " + catalogFH,
                         task.clientHandle);
             }
             final String dep = new String(catalogContext.getDeploymentBytes(), StandardCharsets.UTF_8);
@@ -1164,7 +1164,7 @@ public final class InvocationDispatcher {
             final boolean isReadOnly,
             final boolean isSinglePartition,
             final boolean isEveryPartition,
-            final int partition,
+            final int[] partitions,
             final int messageSize,
             final long nowNanos)
     {
@@ -1176,7 +1176,7 @@ public final class InvocationDispatcher {
                 isReadOnly,
                 isSinglePartition,
                 isEveryPartition,
-                partition,
+                partitions,
                 messageSize,
                 nowNanos,
                 false);  // is for replay.
@@ -1191,12 +1191,12 @@ public final class InvocationDispatcher {
             final boolean isReadOnly,
             final boolean isSinglePartition,
             final boolean isEveryPartition,
-            final int partition,
+            final int[] partitions,
             final int messageSize,
             long nowNanos,
             final boolean isForReplay)
     {
-        assert(!isSinglePartition || (partition >= 0));
+        assert(!isSinglePartition || (partitions.length == 1));
         final ClientInterfaceHandleManager cihm = m_cihm.get(connectionId);
         if (cihm == null) {
             hostLog.rateLimitedLog(60, Level.WARN, null,
@@ -1209,22 +1209,11 @@ public final class InvocationDispatcher {
         Long initiatorHSId = null;
         boolean isShortCircuitRead = false;
         /*
-         * ReadLevel.FAST:
-         * If this is a read only single part, check if there is a local replica,
-         * if there is, send it to the replica as a short circuit read
-         *
-         * ReadLevel.SAFE:
          * Send the read to the partition leader only
+         * @MigratePartitionLeader always goes to partition leader
          */
         if (isSinglePartition && !isEveryPartition) {
-            if (isReadOnly && (m_defaultConsistencyReadLevel == ReadLevel.FAST)) {
-                initiatorHSId = m_localReplicas.get().get(partition);
-            }
-            if (initiatorHSId != null) {
-                isShortCircuitRead = true;
-            } else {
-                initiatorHSId = m_cartographer.getHSIdForSinglePartitionMaster(partition);
-            }
+            initiatorHSId = m_cartographer.getHSIdForSinglePartitionMaster(partitions[0]);
         } else {
             // Multi-part transactions go to the multi-part coordinator
             initiatorHSId = m_cartographer.getHSIdForMultiPartitionInitiator();
@@ -1236,8 +1225,8 @@ public final class InvocationDispatcher {
             }
         }
 
-        long handle = cihm.getHandle(isSinglePartition, partition, invocation.getClientHandle(),
-                messageSize, nowNanos, invocation.getProcName(), initiatorHSId, isReadOnly, isShortCircuitRead);
+        long handle = cihm.getHandle(isSinglePartition, isSinglePartition ? partitions[0] : -1, invocation.getClientHandle(),
+                messageSize, nowNanos, invocation.getProcName(), initiatorHSId, isShortCircuitRead);
 
         Iv2InitiateTaskMessage workRequest =
             new Iv2InitiateTaskMessage(m_siteId,
@@ -1247,6 +1236,7 @@ public final class InvocationDispatcher {
                     uniqueId,
                     isReadOnly,
                     isSinglePartition,
+                    (partitions == null) || (partitions.length < 2) ? null : partitions,
                     invocation,
                     handle,
                     connectionId,
@@ -1259,7 +1249,7 @@ public final class InvocationDispatcher {
                                                       invocation.getClientHandle(),
                                                       "clientHandle", Long.toString(invocation.getClientHandle()),
                                                       "ciHandle", Long.toString(handle),
-                                                      "partition", Integer.toString(partition),
+                                                      "partitions", partitions.toString(),
                                                       "dest", CoreUtils.hsIdToString(finalInitiatorHSId)));
         }
 
@@ -1268,14 +1258,38 @@ public final class InvocationDispatcher {
         return true;
     }
 
-    final static int getPartitionForProcedure(Procedure procedure, StoredProcedureInvocation task) {
+    final static int[] getPartitionsForProcedure(Procedure procedure, StoredProcedureInvocation task) {
         final CatalogContext.ProcedurePartitionInfo ppi =
-                (CatalogContext.ProcedurePartitionInfo)procedure.getAttachment();
+                (CatalogContext.ProcedurePartitionInfo) procedure.getAttachment();
         if (procedure.getSinglepartition()) {
             // break out the Hashinator and calculate the appropriate partition
-            return getPartitionForProcedure( ppi.index, ppi.type, task);
+            Object invocationParameter = task.getParameterAtIndex(ppi.index);
+            if (invocationParameter == null && procedure.getReadonly()) {
+                // AdHoc replicated table reads are optimized as single partition,
+                // but without partition params, since replicated table reads can
+                // be done on any partition, round-robin the procedure to local
+                // partitions to spread the traffic.
+                assert (task.getProcName().equals("@AdHoc_RO_SP")): task.getProcName();
+
+                int partitionIdIndex = (Math.abs(++m_nextPartition)) % m_partitionCount;
+                int partitionId = m_partitionIds.get(partitionIdIndex);
+                return new int[] {partitionId};
+            }
+            return new int[] { TheHashinator.getPartitionForParameter(ppi.type, invocationParameter) };
+        } else if (procedure.getPartitioncolumn2() != null) {
+            // two-partition procedure
+            VoltType partitionParamType1 = VoltType.get((byte)procedure.getPartitioncolumn().getType());
+            VoltType partitionParamType2 = VoltType.get((byte)procedure.getPartitioncolumn2().getType());
+            Object invocationParameter1 = task.getParameterAtIndex(procedure.getPartitionparameter());
+            Object invocationParameter2 = task.getParameterAtIndex(procedure.getPartitionparameter2());
+
+            int p1 = TheHashinator.getPartitionForParameter(partitionParamType1, invocationParameter1);
+            int p2 = TheHashinator.getPartitionForParameter(partitionParamType2, invocationParameter2);
+
+            return new int[] { p1, p2 };
         } else {
-            return MpInitiator.MP_INIT_PID;
+            // multi-partition procedure
+            return new int[] { MpInitiator.MP_INIT_PID };
         }
     }
 
@@ -1301,16 +1315,6 @@ public final class InvocationDispatcher {
         ClientResponseImpl clientResponse = new ClientResponseImpl(ClientResponse.UNEXPECTED_FAILURE,
                 new VoltTable[0], errorMessage, task.clientHandle);
         return clientResponse;
-    }
-
-
-    /**
-     * Identify the partition for an execution site task.
-     * @return The partition best set up to execute the procedure.
-     */
-    final static int getPartitionForProcedure(int partitionIndex, VoltType partitionType, StoredProcedureInvocation task) {
-        Object invocationParameter = task.getParameterAtIndex(partitionIndex);
-        return TheHashinator.getPartitionForParameter(partitionType, invocationParameter);
     }
 
     private final static ClientResponseImpl errorResponse(Connection c, long handle, byte status, String reason, Exception e, boolean log) {
@@ -1349,6 +1353,10 @@ public final class InvocationDispatcher {
     public void handleAllHostNTProcedureResponse(ClientResponseImpl clientResponseData) {
         long handle = clientResponseData.getClientHandle();
         ProcedureRunnerNT runner = m_NTProcedureService.m_outstanding.get(handle);
+        if (runner == null) {
+            hostLog.info("Run everywhere NTProcedure early returned, probably gets timed out.");
+            return;
+        }
         runner.allHostNTProcedureCallback(clientResponseData);
     }
 

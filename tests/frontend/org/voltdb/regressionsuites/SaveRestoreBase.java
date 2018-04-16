@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -37,6 +37,7 @@ public class SaveRestoreBase extends RegressionSuite {
     protected static final String TMPDIR = "/tmp/" + System.getProperty("user.name");
     protected static final String TMPDIR_MOVED = "/tmp/" + System.getProperty("user.name") + "/moved";
     protected static final String TESTNONCE = "testnonce";
+    protected static final String MAGICNONCE = "MANUAL";
     protected static final String JAR_NAME = "sysproc-threesites.jar";
 
     public SaveRestoreBase(String s) {

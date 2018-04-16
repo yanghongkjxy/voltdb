@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -187,6 +187,14 @@ public final class CatalogMap<T extends CatalogType> implements Iterable<T> {
         } catch (Exception ex) {
             throw new RuntimeException(ex);
         }
+    }
+
+    /**
+     * Clear the contents of the map
+     */
+    public void clear() {
+        if (m_items == null) return;
+        m_items.clear();
     }
 
     void writeCommandsForMembers(StringBuilder sb, Set<String> whiteListFields) {

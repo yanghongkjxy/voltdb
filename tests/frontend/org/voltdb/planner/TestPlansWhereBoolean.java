@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -38,8 +38,9 @@ public class TestPlansWhereBoolean extends PlannerTestCase {
         assertTrue(pn instanceof SendPlanNode);
         pn = pn.getChild(0);
         if (tablePartitioned) {
-            assertTrue(pn instanceof ProjectionPlanNode);
-            pn = pn.getChild(0);
+            if (pn instanceof ProjectionPlanNode) {
+                pn = pn.getChild(0);
+            }
         }
         else {
             assertTrue(pn instanceof SeqScanPlanNode);

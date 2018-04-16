@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -28,17 +28,15 @@ public class TableCountPlanNode extends AbstractScanPlanNode {
         super();
     }
 
-    public TableCountPlanNode(String tableName, String tableAlias) {
-        super(tableName, tableAlias);
-        assert(tableName != null && tableAlias != null);
-    }
-
     public TableCountPlanNode(AbstractScanPlanNode child, AggregatePlanNode apn) {
         super(child.getTargetTableName(), child.getTargetTableAlias());
         m_outputSchema = apn.getOutputSchema().clone();
         m_hasSignificantOutputSchema = true;
         m_estimatedOutputTupleCount = 1;
         m_tableSchema = child.getTableSchema();
+
+        m_tableScan = child.m_tableScan;
+        m_tableScanSchema = child.m_tableScanSchema;
 
         m_isSubQuery = child.isSubQuery();
         if (m_isSubQuery) {

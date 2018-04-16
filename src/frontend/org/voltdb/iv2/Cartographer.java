@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -17,12 +17,15 @@
 
 package org.voltdb.iv2;
 
+import java.util.AbstractMap;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -32,12 +35,14 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
+import org.apache.zookeeper_voltpatches.CreateMode;
 import org.apache.zookeeper_voltpatches.KeeperException;
 import org.apache.zookeeper_voltpatches.ZooKeeper;
 import org.json_voltpatches.JSONException;
 import org.json_voltpatches.JSONStringer;
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.messaging.BinaryPayloadMessage;
+import org.voltcore.messaging.ForeignHost;
 import org.voltcore.messaging.HostMessenger;
 import org.voltcore.utils.CoreUtils;
 import org.voltcore.utils.Pair;
@@ -48,14 +53,18 @@ import org.voltdb.AbstractTopology;
 import org.voltdb.MailboxNodeContent;
 import org.voltdb.StatsSource;
 import org.voltdb.VoltDB;
+import org.voltdb.VoltTable;
 import org.voltdb.VoltTable.ColumnInfo;
 import org.voltdb.VoltType;
 import org.voltdb.VoltZK;
 import org.voltdb.VoltZK.MailboxType;
+import org.voltdb.iv2.LeaderCache.LeaderCallBackInfo;
 
 import com.google_voltpatches.common.base.Preconditions;
 import com.google_voltpatches.common.collect.ArrayListMultimap;
 import com.google_voltpatches.common.collect.ImmutableMap;
+import com.google_voltpatches.common.collect.Lists;
+import com.google_voltpatches.common.collect.Maps;
 import com.google_voltpatches.common.collect.Multimap;
 import com.google_voltpatches.common.collect.Multimaps;
 import com.google_voltpatches.common.collect.Sets;
@@ -78,8 +87,10 @@ public class Cartographer extends StatsSource
 
     public static final String JSON_PARTITION_ID = "partitionId";
     public static final String JSON_INITIATOR_HSID = "initiatorHSId";
+
     private final int m_configuredReplicationFactor;
-    private final boolean m_partitionDetectionEnabled;
+    //partition masters by host
+    private final Map<Integer, Set<Long>> m_currentMastersByHost = Maps.newTreeMap();
 
     private final ExecutorService m_es
             = CoreUtils.getCachedSingleThreadExecutor("Cartographer", 15000);
@@ -87,8 +98,15 @@ public class Cartographer extends StatsSource
     // This message used to be sent by the SP or MP initiator when they accepted a promotion.
     // For dev speed, we'll detect mastership changes here and construct and send this message to the
     // local client interface so we can keep the CIs implementation
-    private void sendLeaderChangeNotify(long hsId, int partitionId)
+    private void sendLeaderChangeNotify(long hsId, int partitionId, boolean migratePartitionLeader)
     {
+        //do not notify the leader change because of MigratePartitionLeader to avoid intentional transaction drop
+        if (migratePartitionLeader) {
+            return;
+        }
+        hostLog.info("[Cartographer] Sending leader change notification with new leader:" +
+                CoreUtils.hsIdToString(hsId) + " for partition:" + partitionId);
+
         try {
             JSONStringer stringer = new JSONStringer();
             stringer.object();
@@ -109,12 +127,13 @@ public class Cartographer extends StatsSource
     LeaderCache.Callback m_MPICallback = new LeaderCache.Callback()
     {
         @Override
-        public void run(ImmutableMap<Integer, Long> cache) {
+        public void run(ImmutableMap<Integer, LeaderCallBackInfo> cache) {
             // Every MPI change means a new single MPI.  Just do the right thing here
             int pid = MpInitiator.MP_INIT_PID;
             // Can be zero-length at startup
             if (cache.size() > 0) {
-                sendLeaderChangeNotify(cache.get(pid), pid);
+                hostLog.info("[Cartographer MP] Sending leader change notification with new leader:");
+                sendLeaderChangeNotify(cache.get(pid).m_HSID, pid, false);
             }
         }
     };
@@ -122,25 +141,53 @@ public class Cartographer extends StatsSource
     LeaderCache.Callback m_SPIMasterCallback = new LeaderCache.Callback()
     {
         @Override
-        public void run(ImmutableMap<Integer, Long> cache) {
+        public void run(ImmutableMap<Integer, LeaderCallBackInfo> cache) {
             // We know there's a 1:1 mapping between partitions and HSIds in this map.
             // let's flip it
             Map<Long, Integer> hsIdToPart = new HashMap<Long, Integer>();
-            for (Entry<Integer, Long> e : cache.entrySet()) {
-                hsIdToPart.put(e.getValue(), e.getKey());
+            Set<LeaderCallBackInfo> newMasters = new HashSet<LeaderCallBackInfo>();
+            Set<Long> newHSIDs = Sets.newHashSet();
+            Map<Integer, Set<Long>> newMastersByHost = Maps.newTreeMap();
+            for (Entry<Integer, LeaderCallBackInfo> e : cache.entrySet()) {
+                Long hsid = e.getValue().m_HSID;
+                newHSIDs.add(hsid);
+                hsIdToPart.put(hsid, e.getKey());
+                int hostId = CoreUtils.getHostIdFromHSId(hsid);
+                Set<Long> masters = newMastersByHost.get(hostId);
+                if (masters == null) {
+                    masters = Sets.newHashSet();
+                    newMastersByHost.put(hostId, masters);
+                }
+                masters.add(hsid);
+                if (!m_currentSPMasters.contains(hsid)) {
+                    // we want to see items which are present in the new map but not in the old,
+                    // these are newly promoted SPIs
+                    newMasters.add(e.getValue());
+                }
             }
-            Set<Long> newMasters = new HashSet<Long>();
-            newMasters.addAll(cache.values());
-            // we want to see items which are present in the new map but not in the old,
-            // these are newly promoted SPIs
-            newMasters.removeAll(m_currentSPMasters);
             // send the messages indicating promotion from here for each new master
-            for (long newMaster : newMasters) {
-                sendLeaderChangeNotify(newMaster, hsIdToPart.get(newMaster));
+            for (LeaderCallBackInfo newMasterInfo : newMasters) {
+                Long newMaster = newMasterInfo.m_HSID;
+                sendLeaderChangeNotify(newMaster, hsIdToPart.get(newMaster), newMasterInfo.m_isMigratePartitionLeaderRequested);
+            }
+
+            if (hostLog.isDebugEnabled()) {
+                Set<String> masters = Sets.newHashSet();
+                m_currentSPMasters.forEach((k) -> {
+                    masters.add(CoreUtils.hsIdToString(k));
+                });
+                hostLog.debug("[Cartographer] SP masters:" + masters);
+                masters.clear();
+                cache.values().forEach((k) -> {
+                    masters.add(CoreUtils.hsIdToString(k.m_HSID));
+                });
+                hostLog.debug("[Cartographer]Updated SP masters:" + masters + ". New masters:" + newMasters);
             }
 
             m_currentSPMasters.clear();
-            m_currentSPMasters.addAll(cache.values());
+            m_currentSPMasters.addAll(newHSIDs);
+            m_currentMastersByHost.clear();
+            m_currentMastersByHost.putAll(newMastersByHost);
         }
     };
 
@@ -178,7 +225,6 @@ public class Cartographer extends StatsSource
         m_iv2Masters = new LeaderCache(m_zk, VoltZK.iv2masters, m_SPIMasterCallback);
         m_iv2Mpi = new LeaderCache(m_zk, VoltZK.iv2mpi, m_MPICallback);
         m_configuredReplicationFactor = configuredReplicationFactor;
-        m_partitionDetectionEnabled = partitionDetectionEnabled;
         try {
             m_iv2Masters.start(true);
             m_iv2Mpi.start(true);
@@ -202,7 +248,12 @@ public class Cartographer extends StatsSource
         m_allMasters.clear();
         m_allMasters.addAll(m_iv2Masters.pointInTimeCache().keySet());
         m_allMasters.add(MpInitiator.MP_INIT_PID);
-        return new DummyIterator(m_allMasters.iterator());
+
+        //make a copy of the master list for the topology statistics to avoid any concurrent modification
+        //since the master list may be updated while the topology statistics is being built.
+        Set<Integer> masters = new HashSet<>();
+        masters.addAll(m_allMasters);
+        return new DummyIterator(masters.iterator());
     }
 
     @Override
@@ -214,7 +265,13 @@ public class Cartographer extends StatsSource
             sites.add(leader);
         }
         else {
-            leader = m_iv2Masters.pointInTimeCache().get(rowKey);
+            //sanity check. The master list may be updated while the statistics is calculated.
+            Long leaderInCache = m_iv2Masters.pointInTimeCache().get(rowKey);
+            if (leaderInCache == null) {
+                return;
+            }
+
+            leader = leaderInCache;
             sites.addAll(getReplicasForPartition((Integer)rowKey));
         }
 
@@ -252,6 +309,15 @@ public class Cartographer extends StatsSource
     public long getHSIdForSinglePartitionMaster(int partitionId)
     {
         return m_iv2Masters.get(partitionId);
+    }
+
+    /**
+     * validate partition id
+     * @param partitionId  The partition id
+     * @return return true if the partition id is valid
+     */
+    public boolean hasPartition(int partitionId) {
+        return ((LeaderCache)m_iv2Masters).contain(partitionId);
     }
 
     // This used to be the method to get this on SiteTracker
@@ -337,6 +403,38 @@ public class Cartographer extends StatsSource
     }
 
     /**
+     * Convenient method, given a set of partitionIds, return the hostId of their partition group buddies.
+     *
+     * @param partitions A list of partitions that to be assigned to the newly rejoined host
+     * @return A set of host IDs that both belong to the same partition group
+     */
+    public Set<Integer> findPartitionGroupPeers(List<Integer> partitions) {
+        Set<Integer> hostIds = Sets.newHashSet();
+        Multimap<Integer, Integer> hostToPartitions = getHostToPartitionMap();
+        Multimap<Integer, Integer> partitionByIds = ArrayListMultimap.create();
+        Multimaps.invertFrom(hostToPartitions, partitionByIds);
+        for (int p : partitions) {
+            hostIds.addAll(partitionByIds.get(p));
+        }
+        return hostIds;
+    }
+
+    /**
+     * @return a multi map of a pair of Partition to HSIDs to all Hosts
+     */
+    public Multimap<Integer, Entry<Integer,Long>> getHostToPartition2HSIdMap() {
+        Multimap<Integer, Entry<Integer,Long>> hostToHSId = ArrayListMultimap.create();
+        for (int pId : getPartitions()) {
+            if (pId == MpInitiator.MP_INIT_PID) {
+                continue;
+            }
+            List<Long> hsIDs = getReplicasForPartition(pId);
+            hsIDs.forEach(hsId -> hostToHSId.put(CoreUtils.getHostIdFromHSId(hsId),  new AbstractMap.SimpleEntry<>(pId, hsId)));
+        }
+        return hostToHSId;
+    }
+
+    /**
      * Given a partition ID, return a list of HSIDs of all the sites with copies of that partition
      */
     public List<Long> getReplicasForPartition(int partition) {
@@ -350,15 +448,28 @@ public class Cartographer extends StatsSource
         }
         catch (KeeperException.NoNodeException e) {
             //Can happen when partitions are being removed
-        } catch (KeeperException ke) {
-            org.voltdb.VoltDB.crashLocalVoltDB("KeeperException getting replicas for partition: " + partition,
-                    true, ke);
+        } catch (KeeperException | InterruptedException e) {
+            org.voltdb.VoltDB.crashLocalVoltDB("Exception getting replicas for partition: " + partition,
+                    true, e);
         }
-        catch (InterruptedException ie) {
-            org.voltdb.VoltDB.crashLocalVoltDB("InterruptedException getting replicas for partition: " +
-                    partition, true, ie);
-        }
+
         return retval;
+    }
+
+    /**
+     * return host site id with a given host id and a partition id
+     * @param hostId  The host id
+     * @param partition  The partition id
+     * @return  a site id or null if there is no such a site
+     */
+    public Long getHSIDForPartitionHost(int hostId, int partition) {
+        List<Long> hsids = getReplicasForPartition(partition);
+        for (Long hsid : hsids) {
+           if (hostId == CoreUtils.getHostIdFromHSId(hsid)){
+               return hsid;
+           }
+        }
+        return null;
     }
 
     /**
@@ -483,14 +594,14 @@ public class Cartographer extends StatsSource
         existingParts.remove(MpInitiator.MP_INIT_PID);
         int partsToAdd = newPartitionTotalCount - existingParts.size();
 
+        hostLog.info("Computing " + partsToAdd + " new partitions to add. Total partitions: " + newPartitionTotalCount);
         if (partsToAdd > 0) {
-            hostLog.info("Computing new partitions to add. Total partitions: " + newPartitionTotalCount);
             for (int i = 0; newPartitions.size() != partsToAdd; i++) {
                 if (!existingParts.contains(i)) {
                     newPartitions.add(i);
                 }
             }
-            hostLog.info("Adding " + partsToAdd + " partitions: " + newPartitions);
+            hostLog.info("Adding new partitions: " + newPartitions);
         }
         return newPartitions;
     }
@@ -528,39 +639,70 @@ public class Cartographer extends StatsSource
     }
 
     //Check partition replicas.
-    public synchronized boolean isClusterSafeIfNodeDies(final Set<Integer> liveHids, final int hid) {
+    public synchronized String stopNodeIfClusterIsSafe(final Set<Integer> liveHids, final int ihid) {
         try {
-            return m_es.submit(new Callable<Boolean>() {
+            return m_es.submit(new Callable<String>() {
                 @Override
-                public Boolean call() throws Exception {
-                    if (m_configuredReplicationFactor == 0
-                            || (m_configuredReplicationFactor == 1 && liveHids.size() == 2 && m_partitionDetectionEnabled)) {
-                        //Dont die in k=0 cluster or 2node k1 (with partition detection on)
-                        return false;
+                public String call() throws Exception {
+                    if (m_configuredReplicationFactor == 0) {
+                        //Dont die in k=0 cluster
+                        return "Stopping individual nodes is only allowed on a K-safe cluster";
                     }
                     // check if any node still in rejoin status
                     try {
                         if (m_zk.exists(CoreZK.rejoin_node_blocker, false) != null) {
-                            return false;
+                            return "All rejoin nodes must be completed";
                         }
                     } catch (KeeperException.NoNodeException ignore) {} // shouldn't happen
                     //Otherwise we do check replicas for host
-                    return doPartitionsHaveReplicas(hid);
+                    Set<Integer> otherStoppedHids = new HashSet<Integer>();
+                    // Write the id of node to be stopped to ZK, partition detection will bypass this node.
+                    ZKUtil.addIfMissing(m_zk, ZKUtil.joinZKPath(VoltZK.host_ids_be_stopped, Integer.toString(ihid)), CreateMode.PERSISTENT, null);
+                    try {
+                        List<String> children = m_zk.getChildren(VoltZK.host_ids_be_stopped, false);
+                        for (String child : children) {
+                            int hostId = Integer.parseInt(child);
+                            otherStoppedHids.add(hostId);
+                        }
+                        otherStoppedHids.remove(ihid); /* don't count self */
+                    } catch (KeeperException.NoNodeException ignore) {}
+                    String reason = doPartitionsHaveReplicas(ihid, otherStoppedHids);
+                    if (reason == null) {
+                        // Safe to stop
+                        m_hostMessenger.sendStopNodeNotice(ihid);
+                        // Shutdown or send poison pill
+                        int hid = m_hostMessenger.getHostId();
+                        if (hid == ihid) {
+                            //Killing myself no pill needs to be sent
+                            VoltDB.instance().halt();
+                        } else {
+                            //Send poison pill with target to kill
+                            m_hostMessenger.sendPoisonPill("@StopNode", ihid, ForeignHost.CRASH_ME);
+                        }
+                    } else {
+                        // unsafe, clear the indicator
+                        ZKUtil.deleteRecursively(m_zk, ZKUtil.joinZKPath(VoltZK.host_ids_be_stopped, Integer.toString(ihid)));
+                    }
+                    return reason;
                 }
             }).get();
         } catch (InterruptedException | ExecutionException t) {
             hostLog.debug("LeaderAppointer: Error in isClusterSafeIfIDie.", t);
+            return "Internal error: " + t.getMessage();
         }
-        return false;
     }
 
-    private boolean doPartitionsHaveReplicas(int hid) {
+    // Check if partitions on host hid will have enough replicas after losing host hid.
+    // If nodesBeingStopped was set, it means there are concurrent @StopNode running,
+    // don't count replicas on those to-be-stopped nodes.
+    private String doPartitionsHaveReplicas(int hid, Set<Integer> nodesBeingStopped) {
         hostLog.debug("Cartographer: Reloading partition information.");
+        assert (!nodesBeingStopped.contains(hid));
         List<String> partitionDirs = null;
         try {
             partitionDirs = m_zk.getChildren(VoltZK.leaders_initiators, null);
         } catch (KeeperException | InterruptedException e) {
-            return false;
+            return "Failed to read ZooKeeper node " + VoltZK.leaders_initiators +": " + e.getMessage();
         }
 
         //Don't fetch the values serially do it asynchronously
@@ -576,7 +718,7 @@ public class Cartographer extends StatsSource
                 m_zk.getChildren(dir, false, childrenCallback, null);
                 childrenCallbacks.offer(childrenCallback);
             } catch (Exception e) {
-                return false;
+                return "Failed to read ZooKeeper node " + dir + ": " + e.getMessage();
             }
         }
         //Assume that we are ksafe
@@ -587,7 +729,7 @@ public class Cartographer extends StatsSource
                 byte[] partitionState = dataCallbacks.poll().getData();
                 if (partitionState != null && partitionState.length == 1) {
                     if (partitionState[0] == LeaderElector.INITIALIZING) {
-                        return false;
+                        return "StopNode is disallowed in initialization phase";
                     }
                 }
 
@@ -598,6 +740,7 @@ public class Cartographer extends StatsSource
                 }
                 //Get Hosts for replicas
                 final List<Integer> replicaHost = new ArrayList<>();
+                final List<Integer> replicaOnStoppingHost = new ArrayList<>();
                 boolean hostHasReplicas = false;
                 for (String replica : replicas) {
                     final String split[] = replica.split("/");
@@ -606,16 +749,222 @@ public class Cartographer extends StatsSource
                     if (hostId == hid) {
                         hostHasReplicas = true;
                     }
+                    if (nodesBeingStopped.contains(hostId)) {
+                        replicaOnStoppingHost.add(hostId);
+                    }
                     replicaHost.add(hostId);
                 }
                 hostLog.debug("Replica Host for Partition " + pid + " " + replicaHost);
                 if (hostHasReplicas && replicaHost.size() <= 1) {
-                    return false;
+                    return "Cluster doesn't have enough replicas";
+                }
+                if (hostHasReplicas && !replicaOnStoppingHost.isEmpty() && replicaHost.size() <= replicaOnStoppingHost.size() + 1) {
+                    return "Cluster doesn't have enough replicas. There are concurrent stop node requests, retry the command later";
                 }
             } catch (InterruptedException | KeeperException | NumberFormatException e) {
-                return false;
+                return "Failed to stop node:" + e.getMessage();
             }
         }
-        return true;
+        return null;
+    }
+
+    /**
+     * used to calculate the partition candidate for migration
+     */
+    private static class Host implements Comparable<Host> {
+
+        final int m_hostId;
+
+        //the master partition ids on the host
+        List<Integer> m_masterPartitionIDs = Lists.newArrayList();
+
+        //the replica partition ids on the host
+        List<Integer> m_replicaPartitionIDs = Lists.newArrayList();
+
+        public Host(int hostId) {
+            m_hostId = hostId;
+        }
+
+        @Override
+        public int compareTo(Host other){
+            return (other.m_masterPartitionIDs.size() - m_masterPartitionIDs.size());
+        }
+
+        @Override
+        public int hashCode() {
+            return m_hostId;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (obj instanceof Host) {
+                Host info = (Host)obj;
+                return m_hostId == info.m_hostId;
+            }
+            return false;
+        }
+
+        public void addPartition(Integer partitionId, boolean master) {
+            if (master) {
+                m_masterPartitionIDs.add(partitionId);
+            } else {
+                m_replicaPartitionIDs.add(partitionId);
+            }
+        }
+
+        public int getPartitionLeaderCount() {
+            return m_masterPartitionIDs.size();
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder builder = new StringBuilder();
+            builder.append("Host:" + m_hostId);
+            builder.append(", master:" + m_masterPartitionIDs);
+            builder.append(", replica:" + m_replicaPartitionIDs);
+            return builder.toString();
+        }
+    }
+
+    /**
+     * find a partition and its target host for MigratePartitionLeader
+     * SPI is migrated from the host with most partition leaders to a host which has the partition replica and
+     * the least number of partition. if the host with @localHostId is not the host which has the most partition
+     * leaders, return null. Eventually the host with most partition leaders will initiate MigratePartitionLeader.
+     * @param hostCount  The number of hosts in the cluster
+     * @param localHostId  the host id
+     * @return  a pair of partition id and destination host id
+     */
+    public Pair<Integer, Integer> getPartitionForMigratePartitionLeader(int hostCount, int localHostId) {
+
+        Set<Integer> liveHosts = m_hostMessenger.getLiveHostIds();
+        if (liveHosts.size() == 1) {
+            return null;
+        }
+
+        final int maxMastersPerHost = (int)Math.ceil(((double)getPartitionCount()) / hostCount);
+        final int minMastersPerHost = (getPartitionCount() / hostCount);
+
+        //collect host and partition info
+        Map<Integer, Host> hostsMap = Maps.newHashMap();
+        Set<Integer> allMasters = new HashSet<Integer>();
+        allMasters.addAll(m_iv2Masters.pointInTimeCache().keySet());
+        for ( Iterator<Integer> it = allMasters.iterator(); it.hasNext();) {
+            Integer partitionId = it.next();
+            int leaderHostId = CoreUtils.getHostIdFromHSId(m_iv2Masters.pointInTimeCache().get(partitionId));
+
+            //sanity check to make sure that the topology is not in the middle of leader promotion
+            if (!liveHosts.contains(leaderHostId)) {
+                return null;
+            }
+            Host leaderHost = hostsMap.get(leaderHostId);
+            if (leaderHost == null) {
+                leaderHost = new Host(leaderHostId);
+                hostsMap.put(leaderHostId, leaderHost);
+            }
+            List<Long> sites = getReplicasForPartition(partitionId);
+            for (long site : sites) {
+                int hostId = CoreUtils.getHostIdFromHSId(site);
+                if (!liveHosts.contains(hostId)) {
+                    return null;
+                }
+                Host host = hostsMap.get(hostId);
+                if (host == null) {
+                    host = new Host(hostId);
+                    hostsMap.put(hostId, host);
+                }
+                host.addPartition(partitionId, (leaderHostId == hostId));
+            }
+        }
+
+        //Sort the hosts by partition leader count, descending
+        LinkedList<Host> hostList = new LinkedList<Host>(hostsMap.values());
+        Collections.sort(hostList);
+
+        //only move SPI from the one with most partition leaders
+        //The local ClientInterface will pick it up and start @MigratePartitionLeader
+        Iterator<Host> it = hostList.iterator();
+        Host srcHost = it.next();
+
+        //@MigratePartitionLeader is initiated on the host with the old leader to facilitate DR integration
+        //If current host does not have the most partition leaders, give it up.
+        if (srcHost.m_hostId != localHostId) {
+            return null;
+        }
+
+        //The new host is the one with least number of partition leaders and the partition replica
+        for (Iterator<Host> reverseIt = hostList.descendingIterator(); reverseIt.hasNext();) {
+            Host targetHost = reverseIt.next();
+            int partitionCandidate = findNewLeaderHost(srcHost,targetHost, maxMastersPerHost, minMastersPerHost);
+            if (partitionCandidate > -1){
+                Pair<Integer, Integer> pair = new Pair<Integer, Integer> (partitionCandidate, targetHost.m_hostId);
+                return pair;
+            }
+        }
+
+        //indicate that the cluster is balanced.
+        Pair<Integer, Integer> pair = new Pair<Integer, Integer> (-1, -1);
+        return pair;
+    }
+
+    private int findNewLeaderHost(Host src, Host target, int maxMastersPerHost, int minMastersPerHost) {
+        //cann't move onto itself
+        if (src.equals(target)) {
+            return -1;
+        }
+
+        // still have more leaders than max?
+        if (src.getPartitionLeaderCount() > maxMastersPerHost) {
+            for (Integer partition : src.m_masterPartitionIDs) {
+                if (target.m_replicaPartitionIDs.contains(partition) && target.getPartitionLeaderCount() < maxMastersPerHost) {
+                    return partition;
+                }
+            }
+        } else {
+            if (target.getPartitionLeaderCount() >= minMastersPerHost || src.getPartitionLeaderCount() <= minMastersPerHost) {
+                return -1;
+            } else {
+                for (Integer partition : src.m_masterPartitionIDs) {
+                    if (target.m_replicaPartitionIDs.contains(partition)) {
+                        return partition;
+                    }
+                }
+            }
+        }
+        return -1;
+    }
+
+    //return the number of masters on a host
+    public int getMasterCount(int hostId) {
+        Set<Long> masters = m_currentMastersByHost.get(hostId);
+        if (masters == null) {
+            return 0;
+        }
+        return masters.size();
+    }
+
+    //Utility method to peek the topology
+    public static VoltTable peekTopology(Cartographer cart) {
+        ColumnInfo[] column = new ColumnInfo[3];
+        column[0] = new ColumnInfo("Partition", VoltType.BIGINT);
+        column[1] = new ColumnInfo("Sites", VoltType.STRING);
+        column[2] = new ColumnInfo("Leader", VoltType.STRING);
+        VoltTable t = new VoltTable(column);
+
+        Iterator<Object> i = cart.getStatsRowKeyIterator(false);
+        while (i.hasNext()) {
+            Object rowKey = i.next();
+            long leader;
+            List<Long> sites = new ArrayList<Long>();
+            if (rowKey.equals(MpInitiator.MP_INIT_PID)) {
+                leader = cart.getHSIdForMultiPartitionInitiator();
+                sites.add(leader);
+            } else {
+                leader = cart.m_iv2Masters.pointInTimeCache().get(rowKey);
+                sites.addAll(cart.getReplicasForPartition((Integer)rowKey));
+            }
+            t.addRow(rowKey, CoreUtils.hsIdCollectionToString(sites), CoreUtils.hsIdToString(leader));
+        }
+        return t;
     }
 }

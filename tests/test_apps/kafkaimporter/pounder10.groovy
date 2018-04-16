@@ -1,7 +1,7 @@
 #!/usr/bin/env groovy
 
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -60,6 +60,7 @@ cli.with {
     r(longOpt: 'rows', 'number of rows to insert', required:false, args:1)
     t(longOpt: 'topic', 'kafka topic', required:true, args:1)
     b(longOpt: 'borkers','kafka comma delimited broker list', required:true, args:1)
+    c(longOpt: 'compression','one of none, gzip, snappy, lz4', required:true, args:1)
     h(longOpt: 'help', 'usage information', required: false)
 }
 
@@ -81,6 +82,7 @@ def kconf = [
     (KEY_SERIALIZER_CLASS_CONFIG):StringSerializer.class.name,
     (VALUE_SERIALIZER_CLASS_CONFIG):StringSerializer.class.name,
     (BOOTSTRAP_SERVERS_CONFIG):opts.b,
+    (COMPRESSION_TYPE_CONFIG):opts.c,
     (BLOCK_ON_BUFFER_FULL_CONFIG):true,
     (ACKS_CONFIG):'all',
     (RETRIES_CONFIG):4

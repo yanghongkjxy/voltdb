@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -144,9 +144,10 @@ public class Collector {
         // Validate voltdbroot path is valid or not - check if deployment and config info json exists
         File deploymentFile = new File(m_deploymentPath);
         File configInfoFile = new File(m_configInfoPath);
+
         if (!deploymentFile.exists() || !configInfoFile.exists()) {
             System.err.println("ERROR: Invalid database directory " + m_voltdbRoot.getParentFile().getAbsolutePath()
-                    + ". Specify valid database directory using --dir option.");
+                               + ". Specify valid database directory using --dir option.");
             VoltDB.exit(-1);
         }
 

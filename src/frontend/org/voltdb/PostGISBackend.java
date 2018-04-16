@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -21,10 +21,8 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.regex.Pattern;
 
-import org.voltcore.logging.Level;
-import org.voltcore.logging.VoltLogger;
+import org.voltdb.utils.CompressionService;
 import org.voltdb.utils.Encoder;
-import org.voltdb.utils.LogKeys;
 
 /**
  * A wrapper around a PostgreSQL database server that supports PostGIS (a
@@ -64,7 +62,7 @@ public class PostGISBackend extends PostgreSQLBackend {
     private static final QueryTransformer castGeoAsVarcharQueryTransformer
             = new QueryTransformer(castGeoAsVarcharQuery)
             .prefix("ST_AsText(").suffix(")").groups("column")
-            .useWholeMatch().columnType(ColumnType.GEO);
+            .columnType(ColumnType.GEO);
 
     // Captures the use of PointFromText('POINT...
     private static final Pattern pointFromTextQuery = Pattern.compile(
@@ -252,18 +250,18 @@ public class PostGISBackend extends PostgreSQLBackend {
     static public PostGISBackend initializePostGISBackend(CatalogContext context)
     {
         synchronized(backendLock) {
-            if (m_backend == null) {
-                try {
-                    if (m_permanent_db_backend == null) {
-                        m_permanent_db_backend = new PostgreSQLBackend();
-                    }
+            try {
+                if (m_permanent_db_backend == null) {
+                    m_permanent_db_backend = new PostgreSQLBackend();
+                }
+                if (m_backend == null) {
                     Statement stmt = m_permanent_db_backend.getConnection().createStatement();
                     stmt.execute("drop database if exists " + m_database_name + ";");
                     stmt.execute("create database " + m_database_name + ";");
                     m_backend = new PostGISBackend(m_database_name);
                     m_backend.runDDL("create extension postgis;");
                     final String binDDL = context.database.getSchema();
-                    final String ddl = Encoder.decodeBase64AndDecompress(binDDL);
+                    final String ddl = CompressionService.decodeBase64AndDecompress(binDDL);
                     final String[] commands = ddl.split("\n");
                     for (String command : commands) {
                         String decoded_cmd = Encoder.hexDecodeToString(command);
@@ -274,10 +272,10 @@ public class PostGISBackend extends PostgreSQLBackend {
                         m_backend.runDDL(decoded_cmd);
                     }
                 }
-                catch (final Exception e) {
-                    hostLog.fatal("Unable to construct PostGIS backend");
-                    VoltDB.crashLocalVoltDB(e.getMessage(), true, e);
-                }
+            }
+            catch (final Exception e) {
+                hostLog.fatal("Unable to construct PostGIS backend");
+                VoltDB.crashLocalVoltDB(e.getMessage(), true, e);
             }
             return (PostGISBackend) m_backend;
         }

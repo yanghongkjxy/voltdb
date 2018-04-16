@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -20,12 +20,12 @@ package org.voltdb.iv2;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.messaging.Mailbox;
 import org.voltcore.messaging.TransactionInfoBaseMessage;
 import org.voltcore.messaging.VoltMessage;
 import org.voltdb.LoadedProcedureSet;
+import org.voltdb.QueueDepthTracker;
 import org.voltdb.SiteProcedureConnection;
 import org.voltdb.StarvationTracker;
 import org.voltdb.VoltDB;
@@ -146,6 +146,10 @@ abstract public class Scheduler implements InitiatorMessageHandler
         m_isLeader = isLeader;
     }
 
+    public boolean isLeader() {
+        return m_isLeader;
+    }
+
     public SiteTaskerQueue getQueue()
     {
         return m_tasks;
@@ -155,11 +159,15 @@ abstract public class Scheduler implements InitiatorMessageHandler
         m_tasks.setStarvationTracker(tracker);
     }
 
+    public QueueDepthTracker setupQueueDepthTracker(long siteId) {
+        return m_tasks.setupQueueDepthTracker(siteId);
+    }
+
     public void setLock(Object o) {
         m_lock = o;
     }
 
-    public void setDurableUniqueIdListener(DurableUniqueIdListener listener) {
+    public void configureDurableUniqueIdListener(final DurableUniqueIdListener listener, final boolean install) {
         // Durability Listeners should never be assigned to the MP Scheduler
         assert false;
     }

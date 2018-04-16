@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -22,6 +22,7 @@
 
 #include "common/ids.h"
 #include "table.h"
+
 #include "storage/StreamedTableStats.h"
 #include "storage/TableStats.h"
 
@@ -46,23 +47,18 @@ class StreamedTable : public Table {
     friend class StreamedTableStats;
 
 public:
-    StreamedTable(bool exportEnabled, int partitionColumn = -1);
-    StreamedTable(bool exportEnabled, ExportTupleStream* wrapper);
-    static StreamedTable* createForTest(size_t, ExecutorContext*);
-
-    //This returns true if a stream was created thus caller can setSignatureAndGeneration to push.
-    bool enableStream();
+    StreamedTable(int partitionColumn = -1);
+    //Used for test
+    StreamedTable(ExportTupleStream *wrapper, int partitionColumn = -1);
+    static StreamedTable* createForTest(size_t, ExecutorContext*, TupleSchema *schema, std::vector<std::string> & columnNames);
 
     virtual ~StreamedTable();
 
     // virtual Table functions
     // Return a table iterator BY VALUE
-    virtual TableIterator& iterator();
+    TableIterator iterator();
 
-    virtual TableIterator& iteratorDeletingAsWeGo() {
-        throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
-                                      "May not iterate a streamed table.");
-    }
+    TableIterator iteratorDeletingAsWeGo();
 
     // ------------------------------------------------------------------
     // GENERIC TABLE OPERATIONS
@@ -124,6 +120,14 @@ public:
     // No Op
     std::vector<uint64_t> getBlockAddresses() const {
         return std::vector<uint64_t>();
+    }
+
+    void setWrapper(ExportTupleStream *wrapper) {
+        m_wrapper = wrapper;
+    }
+
+    ExportTupleStream* getWrapper() {
+        return m_wrapper;
     }
 
 private:

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -22,6 +22,7 @@ import java.util.List;
 
 import org.voltdb.catalog.Index;
 import org.voltdb.expressions.AbstractExpression;
+import org.voltdb.planner.AbstractParsedStmt;
 import org.voltdb.plannodes.AbstractPlanNode;
 import org.voltdb.plannodes.AbstractScanPlanNode;
 import org.voltdb.plannodes.AggregatePlanNode;
@@ -36,7 +37,7 @@ import org.voltdb.types.PlanNodeType;
 public class ReplaceWithIndexCounter extends MicroOptimization {
 
     @Override
-    protected AbstractPlanNode recursivelyApply(AbstractPlanNode plan)
+    protected AbstractPlanNode recursivelyApply(AbstractPlanNode plan, AbstractParsedStmt parsedStmt)
     {
         assert(plan != null);
 
@@ -53,7 +54,7 @@ public class ReplaceWithIndexCounter extends MicroOptimization {
 
         for (AbstractPlanNode child : children) {
             // TODO this will break when children feed multiple parents
-            AbstractPlanNode newChild = recursivelyApply(child);
+            AbstractPlanNode newChild = recursivelyApply(child, parsedStmt);
             // Do a graft into the (parent) plan only if a replacement for a child was found.
             if (newChild == child) {
                 continue;
@@ -112,8 +113,8 @@ public class ReplaceWithIndexCounter extends MicroOptimization {
 
         IndexScanPlanNode isp = (IndexScanPlanNode)child;
 
-        // Guard against (possible future?) cases of indexable subquery.
-        if (((IndexScanPlanNode)child).isSubQuery()) {
+        // Guard against (possible future?) cases of indexable subquery or common table.
+        if (! ((IndexScanPlanNode)child).isPersistentTableScan()) {
             return plan;
         }
 

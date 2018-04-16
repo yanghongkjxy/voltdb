@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -59,7 +59,7 @@ namespace voltdb {
 class TableIndex;
 
 class UpdatePlanNode;
-class TempTable;
+class AbstractTempTable;
 class PersistentTable;
 
 class UpdateExecutor : public AbstractExecutor
@@ -76,7 +76,7 @@ public:
 
 protected:
     bool p_init(AbstractPlanNode*,
-                TempTableLimits* limits);
+                const ExecutorVector& executorVector);
     bool p_execute(const NValueArray &params);
 
     UpdatePlanNode* m_node;
@@ -84,11 +84,13 @@ protected:
     std::vector<std::pair<int, int> > m_inputTargetMap;
     int m_inputTargetMapSize;
 
-    TempTable* m_inputTable;
+    AbstractTempTable* m_inputTable;
 
     TableTuple m_inputTuple;
     int m_partitionColumn;
     bool m_partitionColumnIsString;
+
+    static int64_t s_modifiedTuples;
 
     /** reference to the engine/context to store the number of modified tuples */
     VoltDBEngine* m_engine;

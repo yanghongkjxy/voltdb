@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -72,7 +72,7 @@ public class DeferredSnapshotSetup implements Callable<DeferredSnapshotSetup> {
                 SNAP_LOG.error("Failed to run deferred snapshot setup", e);
 
                 // Data target creation failed, close all created ones and replace them with DevNull.
-                m_plan.createAllDevNullTargets();
+                m_plan.createAllDevNullTargets(m_error);
             }
         }
 

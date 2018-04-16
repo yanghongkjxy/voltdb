@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -75,8 +75,8 @@ public class CorePlan {
      * @param catalogHash  The sha-1 hash of the catalog this plan was generated against.
      */
     public CorePlan(CompiledPlan plan, byte[] catalogHash) {
-        aggregatorFragment = CompiledPlan.bytesForPlan(plan.rootPlanGraph);
-        collectorFragment = CompiledPlan.bytesForPlan(plan.subPlanGraph);
+        aggregatorFragment = CompiledPlan.bytesForPlan(plan.rootPlanGraph, plan.getIsLargeQuery());
+        collectorFragment = CompiledPlan.bytesForPlan(plan.subPlanGraph, plan.getIsLargeQuery());
 
         // compute the hashes
         MessageDigest md = null;

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -26,10 +26,10 @@ import com.google_voltpatches.common.collect.ImmutableMap;
 public enum StartAction {
 
     CREATE("create", false, null),
-    RECOVER("recover", true, "Command Log Recovery"),
+    RECOVER("recover", false, "Command Log Recovery"),
     SAFE_RECOVER("recover safemode", true, "Command Log Recovery"),
-    REJOIN("rejoin", true, "K-Safety / Node Rejoin"),
-    LIVE_REJOIN("live rejoin", true, "K-Safety / Node Rejoin"),
+    REJOIN("rejoin", false, "K-Safety / Node Rejoin"),
+    LIVE_REJOIN("live rejoin", false, "K-Safety / Node Rejoin"),
     JOIN("add", true, "Elastic Cluster Sizing"),
     INITIALIZE("initialize", false, "Layout and prime voltdbroot"),
     PROBE("probe", false, "Determine start action"),

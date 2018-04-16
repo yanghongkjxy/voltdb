@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -48,6 +48,11 @@ public:
         return NValue::getDoubleValue(value);
     }
 
+    static NValue getDecimalValue(double value) {
+        NValue doubleNVal = ValueFactory::getDoubleValue(value);
+        return doubleNVal.castAsDecimal();
+    }
+
     static NValue getBooleanValue(bool value) {
         return NValue::getBooleanValue(value);
     }
@@ -60,12 +65,12 @@ public:
 
     /// Constructs a value copied into long-lived pooled memory (or the heap)
     /// that will require an explicit NValue::free.
-    static NValue getStringValue(const std::string value, Pool* pool = NULL) {
-        return NValue::getAllocatedValue(VALUE_TYPE_VARCHAR, value.c_str(), value.length(), NULL);
+    static NValue getStringValue(const std::string& value, Pool* pool = NULL) {
+        return NValue::getAllocatedValue(VALUE_TYPE_VARCHAR, value.c_str(), value.length(), pool);
     }
 
     /// Constructs a value copied into temporary thread-local storage.
-    static NValue getTempStringValue(const std::string value) {
+    static NValue getTempStringValue(const std::string& value) {
         return NValue::getTempStringValue(value.c_str(), value.length());
     }
 
@@ -206,6 +211,12 @@ public:
         return value.castAsString();
     }
 
+    // Get an empty NValue with specified data type.
+    static NValue getNValueOfType(const ValueType type) {
+        NValue retval(type);
+        return retval;
+    }
+
     static NValue nvalueFromSQLDefaultType(const ValueType type, const std::string &value, Pool* pool) {
         switch (type) {
             case VALUE_TYPE_NULL:
@@ -247,6 +258,8 @@ public:
         }
         throwDynamicSQLException("Default value parsing error.");
     }
+
+    static NValue getRandomValue(ValueType type, uint32_t maxLength, Pool* pool = NULL);
 };
 }
 #endif /* VALUEFACTORY_HPP_ */

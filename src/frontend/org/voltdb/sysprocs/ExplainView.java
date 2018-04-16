@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -44,7 +44,7 @@ public class ExplainView extends AdHocNTBase {
          * so I THINK that the string is always a single view symbol and all this
          * splitting and iterating is a no-op.
          */
-        List<String> viewNames = SQLLexer.splitStatements(fullViewNames);
+        List<String> viewNames = SQLLexer.splitStatements(fullViewNames).getCompletelyParsedStmts();
         int size = viewNames.size();
         VoltTable[] vt = new VoltTable[size];
         CatalogMap<Table> tables = context.database.getTables();

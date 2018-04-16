@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -59,12 +59,12 @@ public class LightweightNTClientResponseAdapter implements Connection, WriteStre
 
     private final long m_connectionId;
     private final AtomicLong m_handles = new AtomicLong();
-    private final ConcurrentMap<Long, NTNestedProcedureCallback> m_callbacks = new ConcurrentHashMap<>(2048, .75f, 128);
+    private final ConcurrentMap<Long, ProcedureCallback> m_callbacks = new ConcurrentHashMap<>(2048, .75f, 128);
 
     private final InvocationDispatcher m_dispatcher;
 
     private void createTransaction(final InternalAdapterTaskAttributes kattrs,
-            final NTNestedProcedureCallback cb,
+            final ProcedureCallback cb,
             final StoredProcedureInvocation task,
             final AuthSystem.AuthUser user)
     {
@@ -206,6 +206,16 @@ public class LightweightNTClientResponseAdapter implements Connection, WriteStre
     }
 
     @Override
+    public void disableWriteSelection() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void enableWriteSelection() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public String getHostnameAndIPAndPort() {
         return "InternalAdapter";
     }
@@ -217,12 +227,11 @@ public class LightweightNTClientResponseAdapter implements Connection, WriteStre
 
     @Override
     public String getHostnameOrIP(long clientHandle) {
-        NTNestedProcedureCallback callback = m_callbacks.get(clientHandle);
-        if (callback==null) {
+        ProcedureCallback callback = m_callbacks.get(clientHandle);
+        if (callback == null || callback instanceof NTNestedProcedureCallback == false) {
            return getHostnameOrIP();
-        } else {
-            return callback.getHostnameOrIP();
         }
+        return ((NTNestedProcedureCallback)callback).getHostnameOrIP();
     }
 
     @Override
@@ -242,14 +251,18 @@ public class LightweightNTClientResponseAdapter implements Connection, WriteStre
 
     @Override
     public long connectionId(long clientHandle) {
-        NTNestedProcedureCallback callback = m_callbacks.get(clientHandle);
-        if (callback==null) {
+        ProcedureCallback callback = m_callbacks.get(clientHandle);
+        if (callback == null) {
             m_logger.rateLimitedLog(SUPPRESS_INTERVAL, Level.WARN, null,
                     "Could not find caller details for client handle %d. Using internal adapter level connection id", clientHandle);
             return connectionId();
         }
 
-        return callback.getConnectionId(clientHandle);
+        if (callback instanceof NTNestedProcedureCallback == false) {
+            return connectionId();
+        }
+
+        return ((NTNestedProcedureCallback)callback).getConnectionId(clientHandle);
     }
 
     @Override
@@ -264,7 +277,7 @@ public class LightweightNTClientResponseAdapter implements Connection, WriteStre
     public void callProcedure(AuthUser user,
                               boolean isAdmin,
                               int timeout,
-                              NTNestedProcedureCallback cb,
+                              ProcedureCallback cb,
                               String procName,
                               Object[] args)
     {
@@ -287,7 +300,8 @@ public class LightweightNTClientResponseAdapter implements Connection, WriteStre
         try {
             task = MiscUtils.roundTripForCL(task);
         } catch (Exception e) {
-            String msg = String.format("Cannot invoke procedure %s. failed to create task.", procName);
+            String msg = String.format("Cannot invoke procedure %s. failed to create task: %s",
+                    procName, e.getMessage());
             m_logger.rateLimitedLog(SUPPRESS_INTERVAL, Level.ERROR, null, msg);
             ClientResponseImpl cri = new ClientResponseImpl(ClientResponse.UNEXPECTED_FAILURE, new VoltTable[0], msg);
             try {

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -17,6 +17,7 @@
 
 #include "common/NValue.hpp"
 #include "boost/math/constants/constants.hpp"
+
 
 namespace voltdb {
 
@@ -288,6 +289,32 @@ template<> inline NValue NValue::callUnary<FUNC_SEC>() const {
     double cosDouble = std::cos(inputValue);
     double resultDouble = 1 / cosDouble;
     throwDataExceptionIfInfiniteOrNaN(resultDouble, "function SEC");
+    retval.getDouble() = resultDouble;
+    return retval;
+}
+
+/** implement the SQL DEGREE function for all numeric values */
+template<> inline NValue NValue::callUnary<FUNC_DEGREES>() const {
+    if (isNull()) {
+        return *this;
+    }
+    NValue retval(VALUE_TYPE_DOUBLE);
+    double inputValue = castAsDoubleAndGetValue();
+    double resultDouble = inputValue*(180.0 / M_PI);
+    throwDataExceptionIfInfiniteOrNaN(resultDouble, "function DEGREES");
+    retval.getDouble() = resultDouble;
+    return retval;
+}
+
+/** implement the SQL RADIAN function for all numeric values */
+template<> inline NValue NValue::callUnary<FUNC_RADIANS>() const {
+    if (isNull()) {
+        return *this;
+    }
+    NValue retval(VALUE_TYPE_DOUBLE);
+    double inputValue = castAsDoubleAndGetValue();
+    double resultDouble = inputValue*(M_PI / 180.0);
+    throwDataExceptionIfInfiniteOrNaN(resultDouble, "function Radians");
     retval.getDouble() = resultDouble;
     return retval;
 }

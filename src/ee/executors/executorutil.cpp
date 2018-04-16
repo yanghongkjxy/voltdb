@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -47,7 +47,7 @@
 
 namespace voltdb {
 
-CountingPostfilter::CountingPostfilter(const TempTable* table, const AbstractExpression * postPredicate, int limit, int offset,
+CountingPostfilter::CountingPostfilter(const AbstractTempTable* table, const AbstractExpression * postPredicate, int limit, int offset,
     CountingPostfilter* parentPostfilter) :
     m_table(table),
     m_postPredicate(postPredicate),

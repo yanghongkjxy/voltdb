@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -69,7 +69,7 @@ class AbstractJoinExecutor : public AbstractExecutor {
         AbstractJoinExecutor(VoltDBEngine *engine, AbstractPlanNode* abstract_node) :
             AbstractExecutor(engine, abstract_node) { }
 
-        bool p_init(AbstractPlanNode*, TempTableLimits* limits);
+        bool p_init(AbstractPlanNode*, const ExecutorVector& executorVector);
 
         void p_init_null_tuples(Table* outer_table, Table* inner_table);
 

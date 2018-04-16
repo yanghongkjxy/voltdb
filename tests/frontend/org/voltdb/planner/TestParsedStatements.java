@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -28,8 +28,6 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.util.Map.Entry;
 
-import junit.framework.TestCase;
-
 import org.hsqldb_voltpatches.HSQLInterface;
 import org.hsqldb_voltpatches.HSQLInterface.HSQLParseException;
 import org.hsqldb_voltpatches.VoltXMLElement;
@@ -38,6 +36,8 @@ import org.voltdb.benchmark.tpcc.TPCCProjectBuilder;
 import org.voltdb.catalog.Catalog;
 import org.voltdb.catalog.Database;
 import org.voltdb.utils.BuildDirectoryUtils;
+
+import junit.framework.TestCase;
 
 public class TestParsedStatements extends TestCase {
 
@@ -53,7 +53,7 @@ public class TestParsedStatements extends TestCase {
         m_db = catalog.getClusters().get("cluster").getDatabases().get("database");
 
         URL url = TPCCProjectBuilder.class.getResource("tpcc-ddl.sql");
-        m_hsql = HSQLInterface.loadHsqldb();
+        m_hsql = HSQLInterface.loadHsqldb(ParameterizationInfo.getParamStateManager());
         try {
             m_hsql.runDDLFile(URLDecoder.decode(url.getPath(), "UTF-8"));
         } catch (UnsupportedEncodingException e) {
@@ -83,7 +83,7 @@ public class TestParsedStatements extends TestCase {
         BuildDirectoryUtils.writeFile("statement-hsql-xml", stmtName + ".xml", xmlSQL.toString(), true);
 
         // get a parsed statement from the xml
-        AbstractParsedStmt parsedStmt = AbstractParsedStmt.parse(stmtSQL, xmlSQL, null, m_db, null);
+        AbstractParsedStmt parsedStmt = AbstractParsedStmt.parse(null, stmtSQL, xmlSQL, null, m_db, null);
         // analyze expressions
         // except for "insert" statements that currently do without a joinTree.
         if (parsedStmt.m_joinTree != null) {

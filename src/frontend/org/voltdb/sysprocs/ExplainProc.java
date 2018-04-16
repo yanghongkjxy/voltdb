@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -46,7 +46,7 @@ public class ExplainProc extends AdHocNTBase {
          * so I THINK that the string is always a single procname symbol and all this
          * splitting and iterating is a no-op.
          */
-        List<String> procNames = SQLLexer.splitStatements(procedureNames);
+        List<String> procNames = SQLLexer.splitStatements(procedureNames).getCompletelyParsedStmts();
         int size = procNames.size();
         VoltTable[] vt = new VoltTable[size];
 
@@ -65,10 +65,11 @@ public class ExplainProc extends AdHocNTBase {
                     sqlStatements.add(sql);
                     return runNonDDLAdHoc(context,
                             sqlStatements,
-                            true,
-                            null,
+                            true, // infer partitioning
+                            null, // no partition key
                             ExplainMode.EXPLAIN_DEFAULT_PROC,
-                            false,
+                            false, // not a large query
+                            false, // not swap tables
                             new Object[0]);
                 }
 

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -238,7 +238,7 @@ public class PlanSelector implements Cloneable {
     }
 
     public static String outputPlanDebugString(AbstractPlanNode planGraph) throws JSONException {
-        PlanNodeList nodeList = new PlanNodeList(planGraph);
+        PlanNodeList nodeList = new PlanNodeList(planGraph, false);
 
         // get the json serialized version of the plan
         String json = null;
@@ -261,7 +261,7 @@ public class PlanSelector implements Cloneable {
         // GENERATE JSON DEBUGGING OUTPUT BEFORE WE CLEAN UP THE
         // PlanColumns
         // convert a tree into an execution list
-        PlanNodeList nodeList = new PlanNodeList(planGraph);
+        PlanNodeList nodeList = new PlanNodeList(planGraph, plan.getIsLargeQuery());
 
         String json;
         try {

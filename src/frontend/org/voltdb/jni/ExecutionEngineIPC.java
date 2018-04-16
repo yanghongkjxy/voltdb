@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -20,6 +20,7 @@ package org.voltdb.jni;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.InvocationTargetException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
@@ -36,6 +37,7 @@ import org.voltdb.PrivateVoltTableFactory;
 import org.voltdb.StatsSelector;
 import org.voltdb.TableStreamType;
 import org.voltdb.TheHashinator.HashinatorConfig;
+import org.voltdb.UserDefinedFunctionManager.UserDefinedFunctionRunner;
 import org.voltdb.VoltTable;
 import org.voltdb.common.Constants;
 import org.voltdb.exceptions.EEException;
@@ -45,7 +47,8 @@ import org.voltdb.iv2.DeterminismHash;
 import org.voltdb.messaging.FastDeserializer;
 import org.voltdb.messaging.FastSerializer;
 import org.voltdb.sysprocs.saverestore.SnapshotUtil;
-import org.voltdb.utils.Encoder;
+import org.voltdb.utils.SerializationHelper;
+import org.voltdb.utils.CompressionService;
 
 import com.google_voltpatches.common.base.Charsets;
 import com.google_voltpatches.common.base.Throwables;
@@ -125,9 +128,10 @@ public class ExecutionEngineIPC extends ExecutionEngine {
         Hashinate(23),
         GetPoolAllocations(24),
         GetUSOs(25),
-        updateHashinator(27),
-        executeTask(28),
-        applyBinaryLog(29);
+        UpdateHashinator(27),
+        ExecuteTask(28),
+        ApplyBinaryLog(29),
+        ShutDown(30);
         Commands(final int id) {
             m_id = id;
         }
@@ -260,6 +264,18 @@ public class ExecutionEngineIPC extends ExecutionEngine {
          */
         static final int kErrorCode_pushPerFragmentStatsBuffer = 106;
 
+        /**
+         * Instruct the Java side to invoke a user-defined function and
+         * return the result.
+         */
+        static final int kErrorCode_callJavaUserDefinedFunction = 107;
+
+        /**
+         * An error code that can be sent at any time indicating that
+         * an export stream is dropped
+         */
+        static final int kErrorCode_pushEndOfStream = 113;
+
         ByteBuffer getBytes(int size) throws IOException {
             ByteBuffer header = ByteBuffer.allocate(size);
             while (header.hasRemaining()) {
@@ -296,6 +312,61 @@ public class ExecutionEngineIPC extends ExecutionEngine {
                         m_executionTimes[m_succeededFragmentsCount] = perFragmentStatsBuffer.getLong();
                     }
                 }
+            }
+            catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        // Internal function to receive and execute the UDF invocation request.
+        void callJavaUserDefinedFunctionInternal() {
+            try {
+                // Read the request content from the wire.
+                int bufferSize = m_connection.readInt();
+                final ByteBuffer udfBuffer = ByteBuffer.allocate(bufferSize);
+                while (udfBuffer.hasRemaining()) {
+                    int read = m_socketChannel.read(udfBuffer);
+                    if (read == -1) {
+                        throw new EOFException();
+                    }
+                }
+                udfBuffer.flip();
+
+                int functionId = udfBuffer.getInt();
+                UserDefinedFunctionRunner udfRunner = m_functionManager.getFunctionRunnerById(functionId);
+                assert(udfRunner != null);
+                Throwable throwable = null;
+                Object returnValue = null;
+                try {
+                    // Call the user-defined function.
+                    returnValue = udfRunner.call(udfBuffer);
+                    m_data.clear();
+                    // Put the status code for success (zero) into the buffer.
+                    m_data.putInt(0);
+                    // Write the result to the buffer.
+                    UserDefinedFunctionRunner.writeValueToBuffer(m_data, udfRunner.getReturnType(), returnValue);
+                    m_data.flip();
+                    m_connection.write();
+                    return;
+                }
+                catch (InvocationTargetException ex1) {
+                    // Exceptions thrown during Java reflection will be wrapped into this InvocationTargetException.
+                    // We need to get its cause and throw that to the user.
+                    throwable = ex1.getCause();
+                }
+                catch (Throwable ex2) {
+                    throwable = ex2;
+                }
+                // Getting here means the execution was not successful.
+                m_data.clear();
+                if (throwable != null) {
+                    // Exception thrown, put return code = -1.
+                    m_data.putInt(-1);
+                    byte[] errorMsg = throwable.toString().getBytes(Constants.UTF8ENCODING);
+                    SerializationHelper.writeVarbinary(errorMsg, m_data);
+                }
+                m_data.flip();
+                m_connection.write();
             }
             catch (IOException e) {
                 throw new RuntimeException(e);
@@ -350,16 +421,13 @@ public class ExecutionEngineIPC extends ExecutionEngine {
                 else if (status == kErrorCode_pushExportBuffer) {
                     // Message structure:
                     // pushExportBuffer error code - 1 byte
-                    // export generation - 8 bytes
                     // partition id - 4 bytes
                     // signature length (in bytes) - 4 bytes
                     // signature - signature length bytes
                     // uso - 8 bytes
                     // sync - 1 byte
-                    // end of generation flag - 1 byte
                     // export buffer length - 4 bytes
                     // export buffer - export buffer length bytes
-                    long exportGeneration = getBytes(8).getLong();
                     int partitionId = getBytes(4).getInt();
                     int signatureLength = getBytes(4).getInt();
                     byte signatureBytes[] = new byte[signatureLength];
@@ -367,17 +435,14 @@ public class ExecutionEngineIPC extends ExecutionEngine {
                     String signature = new String(signatureBytes, "UTF-8");
                     long uso = getBytes(8).getLong();
                     boolean sync = getBytes(1).get() == 1 ? true : false;
-                    boolean isEndOfGeneration = getBytes(1).get() == 1 ? true : false;
                     int length = getBytes(4).getInt();
                     ExportManager.pushExportBuffer(
-                            exportGeneration,
                             partitionId,
                             signature,
                             uso,
                             0,
                             length == 0 ? null : getBytes(length),
-                            sync,
-                            isEndOfGeneration);
+                            sync);
                 }
                 else if (status == kErrorCode_getQueuedExportBytes) {
                     ByteBuffer header = ByteBuffer.allocate(8);
@@ -411,10 +476,36 @@ public class ExecutionEngineIPC extends ExecutionEngine {
                         m_socketChannel.write(buf);
                     }
                 }
+                else if (status == kErrorCode_pushEndOfStream) {
+                    ByteBuffer header = ByteBuffer.allocate(8);
+                    while (header.hasRemaining()) {
+                        final int read = m_socket.getChannel().read(header);
+                        if (read == -1) {
+                            throw new EOFException();
+                        }
+                    }
+                    header.flip();
+
+                    int partitionId = header.getInt();
+                    int signatureLength = header.getInt();
+                    ByteBuffer sigbuf = ByteBuffer.allocate(signatureLength);
+                    while (sigbuf.hasRemaining()) {
+                        final int read = m_socket.getChannel().read(sigbuf);
+                        if (read == -1) {
+                            throw new EOFException();
+                        }
+                    }
+                    sigbuf.flip();
+                    byte signatureBytes[] = new byte[signatureLength];
+                    sigbuf.get(signatureBytes);
+                    String signature = new String(signatureBytes, "UTF-8");
+
+                    ExportManager.pushEndOfStream(partitionId, signature);
+                }
                 else if (status == ExecutionEngine.ERRORCODE_DECODE_BASE64_AND_DECOMPRESS) {
                     int dataLength = m_connection.readInt();
                     String data = m_connection.readString(dataLength);
-                    byte[] decodedDecompressedData = Encoder.decodeBase64AndDecompressToBytes(data);
+                    byte[] decodedDecompressedData = CompressionService.decodeBase64AndDecompressToBytes(data);
                     m_data.clear();
                     m_data.put(decodedDecompressedData);
                     m_data.flip();
@@ -465,6 +556,9 @@ public class ExecutionEngineIPC extends ExecutionEngine {
                 else if (status == kErrorCode_pushPerFragmentStatsBuffer) {
                     // The per-fragment stats are in the very beginning.
                     extractPerFragmentStatsInternal();
+                }
+                else if (status == kErrorCode_callJavaUserDefinedFunction) {
+                    callJavaUserDefinedFunctionInternal();
                 }
                 else {
                     break;
@@ -731,6 +825,7 @@ public class ExecutionEngineIPC extends ExecutionEngine {
             final int clusterIndex,
             final long siteId,
             final int partitionId,
+            final int sitesPerHost,
             final int hostId,
             final String hostname,
             final int drClusterId,
@@ -739,7 +834,7 @@ public class ExecutionEngineIPC extends ExecutionEngine {
             final BackendTarget target,
             final int port,
             final HashinatorConfig hashinatorConfig,
-            final boolean createDrReplicatedStream) {
+            final boolean isLowestSiteId) {
         super(siteId, partitionId);
 
         // m_counter = 0;
@@ -762,13 +857,14 @@ public class ExecutionEngineIPC extends ExecutionEngine {
                 m_clusterIndex,
                 m_siteId,
                 m_partitionId,
+                sitesPerHost,
                 m_hostId,
                 m_hostname,
                 drClusterId,
                 defaultDrBufferSize,
                 1024 * 1024 * tempTableMemory,
                 hashinatorConfig,
-                createDrReplicatedStream);
+                isLowestSiteId);
     }
 
     /** Utility method to generate an EEXception that can be overriden by derived classes**/
@@ -786,9 +882,25 @@ public class ExecutionEngineIPC extends ExecutionEngine {
     public void release() throws EEException, InterruptedException {
         System.out.println("Shutdown IPC connection in progress.");
         System.out.println("But first, a little history:\n" + m_history );
+        shutDown();
         m_connection.close();
         System.out.println("Shutdown IPC connection done.");
         m_dataNetworkOrigin.discard();
+    }
+
+    private void shutDown() {
+        int result = ExecutionEngine.ERRORCODE_ERROR;
+        m_data.clear();
+        m_data.putInt(Commands.ShutDown.m_id);
+        try {
+            m_data.flip();
+            m_connection.write();
+            result = m_connection.readStatusByte();
+        } catch (final IOException e) {
+            System.out.println("Excpeption: " + e.getMessage());
+            throw new RuntimeException();
+        }
+        checkErrorCode(result);
     }
 
     private static final Object printLockObject = new Object();
@@ -800,6 +912,7 @@ public class ExecutionEngineIPC extends ExecutionEngine {
             final int clusterIndex,
             final long siteId,
             final int partitionId,
+            final int sitesPerHost,
             final int hostId,
             final String hostname,
             final int drClusterId,
@@ -817,6 +930,7 @@ public class ExecutionEngineIPC extends ExecutionEngine {
         m_data.putInt(clusterIndex);
         m_data.putLong(siteId);
         m_data.putInt(partitionId);
+        m_data.putInt(sitesPerHost);
         m_data.putInt(hostId);
         m_data.putInt(drClusterId);
         m_data.putInt(defaultDrBufferSize);
@@ -958,7 +1072,7 @@ public class ExecutionEngineIPC extends ExecutionEngine {
                     determinismHash.offerStatement(sqlCRCs[i], paramStart, fser.getContainerNoFlip().b());
                 }
             }
-        } catch (final IOException exception) {
+        } catch (final Exception exception) { // ParameterSet serialization can throw RuntimeExceptions
             fser.discard();
             throw new RuntimeException(exception);
         }
@@ -1003,7 +1117,7 @@ public class ExecutionEngineIPC extends ExecutionEngine {
     }
 
     @Override
-    protected FastDeserializer coreExecutePlanFragments(
+    public FastDeserializer coreExecutePlanFragments(
             final int bufferHint,
             final int numFragmentIds,
             final long[] planFragmentIds,
@@ -1436,12 +1550,12 @@ public class ExecutionEngineIPC extends ExecutionEngine {
 
     @Override
     public void exportAction(boolean syncAction,
-            long ackOffset, long seqNo, int partitionId, String mTableSignature) {
+            long uso, long seqNo, int partitionId, String mTableSignature) {
         try {
             m_data.clear();
             m_data.putInt(Commands.ExportAction.m_id);
             m_data.putInt(syncAction ? 1 : 0);
-            m_data.putLong(ackOffset);
+            m_data.putLong(uso);
             m_data.putLong(seqNo);
             if (mTableSignature == null) {
                 m_data.putInt(-1);
@@ -1458,8 +1572,8 @@ public class ExecutionEngineIPC extends ExecutionEngine {
             results.flip();
             long result_offset = results.getLong();
             if (result_offset < 0) {
-                System.out.println("exportAction failed!  syncAction: " + syncAction + ", ackTxnId: " +
-                    ackOffset + ", seqNo: " + seqNo + ", partitionId: " + partitionId +
+                System.out.println("exportAction failed!  syncAction: " + syncAction + ", Uso: " +
+                    uso + ", seqNo: " + seqNo + ", partitionId: " + partitionId +
                     ", tableSignature: " + mTableSignature);
             }
         } catch (final IOException e) {
@@ -1550,7 +1664,6 @@ public class ExecutionEngineIPC extends ExecutionEngine {
 
         m_data.clear();
         m_data.putInt(Commands.Hashinate.m_id);
-        m_data.putInt(config.type.typeId());
         m_data.putInt(config.configBytes.length);
         m_data.put(config.configBytes);
         try {
@@ -1579,8 +1692,7 @@ public class ExecutionEngineIPC extends ExecutionEngine {
     public void updateHashinator(HashinatorConfig config)
     {
         m_data.clear();
-        m_data.putInt(Commands.updateHashinator.m_id);
-        m_data.putInt(config.type.typeId());
+        m_data.putInt(Commands.UpdateHashinator.m_id);
         m_data.putInt(config.configBytes.length);
         m_data.put(config.configBytes);
         try {
@@ -1594,16 +1706,17 @@ public class ExecutionEngineIPC extends ExecutionEngine {
 
     @Override
     public long applyBinaryLog(ByteBuffer log, long txnId, long spHandle, long lastCommittedSpHandle, long uniqueId,
-                               int remoteClusterId, long undoToken)
+                               int remoteClusterId, int remotePartitionId, long undoToken)
     throws EEException
     {
         m_data.clear();
-        m_data.putInt(Commands.applyBinaryLog.m_id);
+        m_data.putInt(Commands.ApplyBinaryLog.m_id);
         m_data.putLong(txnId);
         m_data.putLong(spHandle);
         m_data.putLong(lastCommittedSpHandle);
         m_data.putLong(uniqueId);
         m_data.putInt(remoteClusterId);
+        m_data.putInt(remotePartitionId);
         m_data.putLong(undoToken);
         m_data.put(log.array());
 
@@ -1652,7 +1765,7 @@ public class ExecutionEngineIPC extends ExecutionEngine {
     @Override
     public byte[] executeTask(TaskType taskType, ByteBuffer task) {
         m_data.clear();
-        m_data.putInt(Commands.executeTask.m_id);
+        m_data.putInt(Commands.ExecuteTask.m_id);
         m_data.putLong(taskType.taskId);
         m_data.put(task.array());
         try {

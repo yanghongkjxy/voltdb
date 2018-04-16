@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -44,26 +44,11 @@
  */
 #include "nestloopexecutor.h"
 
-#include "common/debuglog.h"
-#include "common/common.h"
-#include "common/tabletuple.h"
-#include "common/FatalException.hpp"
 #include "executors/aggregateexecutor.h"
-#include "executors/executorutil.h"
-#include "execution/ProgressMonitorProxy.h"
-#include "expressions/abstractexpression.h"
-#include "expressions/tuplevalueexpression.h"
-#include "storage/table.h"
-#include "storage/temptable.h"
 #include "storage/tableiterator.h"
 #include "storage/tabletuplefilter.h"
 #include "plannodes/nestloopnode.h"
 #include "plannodes/limitnode.h"
-#include "plannodes/aggregatenode.h"
-
-#include <vector>
-#include <string>
-#include <stack>
 
 #ifdef VOLT_DEBUG_ENABLED
 #include <ctime>
@@ -78,16 +63,15 @@ const static int8_t UNMATCHED_TUPLE(TableTupleFilter::ACTIVE_TUPLE);
 const static int8_t MATCHED_TUPLE(TableTupleFilter::ACTIVE_TUPLE + 1);
 
 bool NestLoopExecutor::p_init(AbstractPlanNode* abstractNode,
-                                   TempTableLimits* limits)
+                              const ExecutorVector& executorVector)
 {
     VOLT_TRACE("init NLJ Executor");
-    assert(limits);
 
     NestLoopPlanNode* node = dynamic_cast<NestLoopPlanNode*>(m_abstractNode);
     assert(node);
 
     // Init parent first
-    if (!AbstractJoinExecutor::p_init(abstractNode, limits)) {
+    if (!AbstractJoinExecutor::p_init(abstractNode, executorVector)) {
         return false;
     }
 
@@ -253,9 +237,6 @@ bool NestLoopExecutor::p_execute(const NValueArray &params) {
     if (m_aggExec != NULL) {
         m_aggExec->p_execute_finish();
     }
-
-    cleanupInputTempTable(inner_table);
-    cleanupInputTempTable(outer_table);
 
     return (true);
 }

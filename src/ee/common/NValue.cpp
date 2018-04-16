@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -19,12 +19,6 @@
 #include "common/StlFriendlyNValue.h"
 #include "common/executorcontext.hpp"
 #include "expressions/functionexpression.h" // Really for datefunctions and its dependencies.
-#include "logging/LogManager.h"
-
-#include <cstdio>
-#include <sstream>
-#include <algorithm>
-#include <set>
 
 namespace voltdb {
 Pool* NValue::getTempStringPool() {
@@ -125,14 +119,16 @@ TTInt NValue::s_minInt64AsDecimal(TTInt(-INT64_MAX) * kMaxScaleFactor);
  */
 std::string NValue::debug() const {
     const ValueType type = getValueType();
-    if (isNull()) {
-        return "<NULL>";
-    }
     std::ostringstream buffer;
     std::string out_val;
     const char* ptr;
 
     buffer << getTypeName(type) << "::";
+    if (isNull()) {
+        buffer << "<NULL>";
+        return buffer.str();
+    }
+
     switch (type) {
     case VALUE_TYPE_BOOLEAN:
         buffer << (getBoolean() ? "true" : "false");
@@ -201,6 +197,23 @@ std::string NValue::debug() const {
     return (ret);
 }
 
+int32_t NValue::serializedSize() const {
+    switch (m_valueType) {
+    case VALUE_TYPE_VARCHAR:
+    case VALUE_TYPE_VARBINARY:
+    case VALUE_TYPE_GEOGRAPHY: {
+            int32_t length = sizeof(int32_t);
+            if (! isNull()) {
+                int32_t valueLength;
+                getObject_withoutNull(&valueLength);
+                length += valueLength;
+            }
+            return length;
+        }
+    default:
+        return getTupleStorageSize(m_valueType);
+    }
+}
 
 /**
  * Serialize sign and value using radix point (no exponent).

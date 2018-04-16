@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -47,6 +47,7 @@ import org.voltdb.utils.VoltTypeUtil;
 import org.voltdb_testprocs.regressionsuites.sqltypesprocs.Delete;
 import org.voltdb_testprocs.regressionsuites.sqltypesprocs.Insert;
 import org.voltdb_testprocs.regressionsuites.sqltypesprocs.InsertBase;
+import org.voltdb_testprocs.regressionsuites.sqltypesprocs.InsertBoxed;
 import org.voltdb_testprocs.regressionsuites.sqltypesprocs.InsertMulti;
 import org.voltdb_testprocs.regressionsuites.sqltypesprocs.ParamSetArrays;
 import org.voltdb_testprocs.regressionsuites.sqltypesprocs.Select;
@@ -66,9 +67,9 @@ public class TestSQLTypesSuite extends RegressionSuite {
     // 1500 character string
     private static final String ReallyLongString;
 
-    /** Procedures used by this suite */
-    static final Class<?>[] PROCEDURES = { Delete.class, Insert.class,
-            InsertBase.class, InsertMulti.class, Select.class, Update.class,
+    /** MP Procedures used by this suite */
+    static final Class<?>[] MP_PROCEDURES = {
+            InsertBase.class, InsertBoxed.class, InsertMulti.class,
             UpdateDecimal.class, ParamSetArrays.class };
 
     /** Utility to create an array of bytes with value "b" of length "length" */
@@ -81,7 +82,6 @@ public class TestSQLTypesSuite extends RegressionSuite {
     }
 
     /** Utility to compare two instances of a VoltType for equality */
-    @SuppressWarnings({ "incomplete-switch" })
     private boolean comparisonHelper(final Object lhs, final Object rhs,
             final VoltType vt) {
         switch (vt) {
@@ -965,6 +965,47 @@ public class TestSQLTypesSuite extends RegressionSuite {
         }
     }
 
+    public void testInsertNullBoxed() throws IOException, ProcCallException {
+        Client client = this.getClient();
+
+        Integer p_key = pkey.incrementAndGet();
+        VoltTable[] results = client.callProcedure("InsertBoxed", p_key,
+                new Byte( (byte) -128), new Short( (short) -32768),
+                new Integer(-2147483648), new Long(-9223372036854775808L) ).getResults();
+
+        System.out.println("testInsertBoxedNulls" + results[1]);
+
+        results[1].advanceRow();
+        assertEquals(VoltType.NULL_TINYINT, results[1].get("A_TINYINT", VoltType.TINYINT));
+        assertEquals(VoltType.NULL_SMALLINT, results[1].get("A_SMALLINT", VoltType.SMALLINT));
+        assertEquals(VoltType.NULL_INTEGER, results[1].get("A_INTEGER", VoltType.INTEGER));
+        assertEquals(VoltType.NULL_BIGINT, results[1].get("A_BIGINT", VoltType.BIGINT));
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM WITH_DEFAULTS WHERE A_TINYINT IS NULL").getResults();
+        results[0].advanceRow();
+        assertEquals(p_key, results[0].get("PKEY", VoltType.INTEGER));
+    }
+
+    public void testInsertNullValues() throws IOException, ProcCallException {
+        Client client = this.getClient();
+
+        Integer p_key = pkey.incrementAndGet();
+        VoltTable[] results = client.callProcedure("InsertBoxed", p_key,
+                null, null, null, null).getResults();
+
+        System.out.println("testInsertNullValues" + results[1]);
+
+        results[1].advanceRow();
+        assertEquals(VoltType.NULL_TINYINT, results[1].get("A_TINYINT", VoltType.TINYINT));
+        assertEquals(VoltType.NULL_SMALLINT, results[1].get("A_SMALLINT", VoltType.SMALLINT));
+        assertEquals(VoltType.NULL_INTEGER, results[1].get("A_INTEGER", VoltType.INTEGER));
+        assertEquals(VoltType.NULL_BIGINT, results[1].get("A_BIGINT", VoltType.BIGINT));
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM WITH_DEFAULTS WHERE A_TINYINT IS NULL").getResults();
+        results[0].advanceRow();
+        assertEquals(p_key, results[0].get("PKEY", VoltType.INTEGER));
+    }
+
     public void testMissingAttributeInsert_With_Defaults()
             throws NoConnectionsException, ProcCallException, IOException {
         Client client = this.getClient();
@@ -1436,7 +1477,14 @@ public class TestSQLTypesSuite extends RegressionSuite {
         project.addPartitionInfo("EXPRESSIONS_WITH_NULLS", "PKEY");
         project.addPartitionInfo("EXPRESSIONS_NO_NULLS", "PKEY");
         project.addPartitionInfo("JUMBO_ROW", "PKEY");
-        project.addProcedures(PROCEDURES);
+        project.addMultiPartitionProcedures(MP_PROCEDURES);
+
+        project.addProcedure(Delete.class, "ALLOW_NULLS.PKEY: 1");
+        project.addProcedure(Insert.class, "NO_NULLS.PKEY: 1");
+        project.addProcedure(Select.class, "NO_NULLS.PKEY: 1");
+        project.addProcedure(Update.class, "NO_NULLS.PKEY: 1");
+
+
         project.addStmtProcedure(
                 "PassObjectNull",
                 "insert into ALLOW_NULLS values ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",

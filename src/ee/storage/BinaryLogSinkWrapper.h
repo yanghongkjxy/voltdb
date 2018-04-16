@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -36,7 +36,7 @@ public:
     BinaryLogSinkWrapper() {}
 
     int64_t apply(const char* taskParams, boost::unordered_map<int64_t, PersistentTable*> &tables,
-                  Pool *pool, VoltDBEngine *engine, int32_t remoteClusterId);
+                  Pool *pool, VoltDBEngine *engine, int32_t remoteClusterId, int64_t localUniqueId);
 private:
     BinaryLogSink m_sink;
 };

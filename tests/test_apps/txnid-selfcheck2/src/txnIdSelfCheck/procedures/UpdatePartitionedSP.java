@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -28,7 +28,7 @@ import org.voltdb.VoltTable;
 public class UpdatePartitionedSP extends UpdateBaseProc {
 
     public VoltTable[] run(byte cid, long rid, byte[] value, byte rollback) {
-        return doWork(p_getCIDData, p_cleanUp, p_insert, p_export, p_getAdhocData, p_getViewData,
+        return doWork(p_getCIDData, p_cleanUp, p_insert, p_update, p_export, p_getAdhocData, p_getViewData,
                 cid, rid, value, rollback, true);
     }
 }

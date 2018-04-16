@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -17,11 +17,13 @@
 
 #ifndef JNITOPEND_H_
 #define JNITOPEND_H_
+#include <jni.h>
+
 #include "boost/shared_array.hpp"
 #include "common/Topend.h"
 #include "common/FatalException.hpp"
+#include "common/LargeTempTableBlockId.hpp"
 #include "common/Pool.hpp"
-#include <jni.h>
 
 namespace voltdb {
 
@@ -45,14 +47,17 @@ public:
     void crashVoltDB(FatalException e);
     int64_t getQueuedExportBytes(int32_t partitionId, std::string signature);
     void pushExportBuffer(
-            int64_t exportGeneration,
             int32_t partitionId,
             std::string signature,
             StreamBlock *block,
-            bool sync,
-            bool endOfStream);
+            bool sync);
+    void pushEndOfStream(
+            int32_t partitionId,
+            std::string signature);
 
     int64_t pushDRBuffer(int32_t partitionId, StreamBlock *block);
+
+    void pushPoisonPill(int32_t partitionId, std::string& reason, StreamBlock *block);
 
     int reportDRConflict(int32_t partitionId, int32_t remoteClusterId, int64_t remoteTimestamp, std::string tableName, DRRecordType action,
             DRConflictType deleteConflict, Table *existingMetaTableForDelete, Table *existingTupleTableForDelete,
@@ -63,6 +68,15 @@ public:
     void fallbackToEEAllocatedBuffer(char *buffer, size_t length);
 
     std::string decodeBase64AndDecompress(const std::string& buffer);
+
+    bool storeLargeTempTableBlock(LargeTempTableBlock* block);
+
+    bool loadLargeTempTableBlock(LargeTempTableBlock* block);
+
+    bool releaseLargeTempTableBlock(LargeTempTableBlockId blockId);
+
+    int32_t callJavaUserDefinedFunction();
+    void resizeUDFBuffer(int32_t size);
 
 private:
     JNIEnv *m_jniEnv;
@@ -79,13 +93,20 @@ private:
     jmethodID m_planForFragmentIdMID;
     jmethodID m_crashVoltDBMID;
     jmethodID m_pushExportBufferMID;
+    jmethodID m_pushExportEOFMID;
     jmethodID m_getQueuedExportBytesMID;
     jmethodID m_pushDRBufferMID;
+    jmethodID m_pushPoisonPillMID;
     jmethodID m_reportDRConflictMID;
     jmethodID m_decodeBase64AndDecompressToBytesMID;
+    jmethodID m_callJavaUserDefinedFunctionMID;
+    jmethodID m_resizeUDFBufferMID;
+    jmethodID m_storeLargeTempTableBlockMID;
+    jmethodID m_loadLargeTempTableBlockMID;
+    jmethodID m_releaseLargeTempTableBlockMID;
     jclass m_exportManagerClass;
     jclass m_partitionDRGatewayClass;
-    jclass m_encoderClass;
+    jclass m_decompressionClass;
 };
 
 }

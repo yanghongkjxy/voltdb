@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -59,7 +59,7 @@ namespace voltdb {
 
 
 /*
- * Unary operators. (NOT and IS_NULL)
+ * Unary operators. (NOT and IS_NULL and UNARY_MINUS)
  */
 
 class OperatorNotExpression : public AbstractExpression {
@@ -109,6 +109,24 @@ class OperatorIsNullExpression : public AbstractExpression {
 
    std::string debugInfo(const std::string &spacer) const {
        return (spacer + "OperatorIsNullExpression");
+   }
+};
+
+class OperatorUnaryMinusExpression : public AbstractExpression {
+  public:
+    OperatorUnaryMinusExpression(AbstractExpression *left)
+        : AbstractExpression(EXPRESSION_TYPE_OPERATOR_UNARY_MINUS) {
+            m_left = left;
+    };
+
+   NValue eval(const TableTuple *tuple1, const TableTuple *tuple2) const {
+       assert(m_left);
+       NValue tmp = m_left->eval(tuple1, tuple2);
+       return tmp.op_unary_minus();
+   }
+
+   std::string debugInfo(const std::string &spacer) const {
+       return (spacer + "OperatorUnaryMinusExpression");
    }
 };
 
@@ -250,7 +268,6 @@ class OperatorExistsExpression : public AbstractExpression {
         return (spacer + "OperatorExistsExpression");
     }
 };
-
 
 }
 #endif

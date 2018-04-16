@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -46,7 +46,7 @@ public class MockExecutionEngine extends ExecutionEngine {
     }
 
     @Override
-    protected FastDeserializer coreExecutePlanFragments(
+    public FastDeserializer coreExecutePlanFragments(
             final int bufferHint,
             final int numFragmentIds,
             final long[] planFragmentIds,
@@ -198,7 +198,7 @@ public class MockExecutionEngine extends ExecutionEngine {
 
     @Override
     public void exportAction(boolean syncAction,
-            long ackOffset, long seqNo, int partitionId, String mTableSignature) {
+            long uso, long seqNo, int partitionId, String mTableSignature) {
     }
 
     @Override
@@ -226,7 +226,7 @@ public class MockExecutionEngine extends ExecutionEngine {
 
     @Override
     public long applyBinaryLog(ByteBuffer log, long txnId, long spHandle, long lastCommittedSpHandle, long uniqueId,
-                               int remoteClusterId, long undoToken) throws EEException
+                               int remoteClusterId, int remotePartitionId, long undoToken) throws EEException
     {
         throw new UnsupportedOperationException();
     }

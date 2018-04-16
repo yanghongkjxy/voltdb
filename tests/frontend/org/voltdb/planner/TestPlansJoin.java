@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -34,6 +34,7 @@ import org.voltdb.plannodes.AggregatePlanNode;
 import org.voltdb.plannodes.IndexScanPlanNode;
 import org.voltdb.plannodes.NestLoopIndexPlanNode;
 import org.voltdb.plannodes.NestLoopPlanNode;
+import org.voltdb.plannodes.NodeSchema;
 import org.voltdb.plannodes.OrderByPlanNode;
 import org.voltdb.plannodes.SchemaColumn;
 import org.voltdb.plannodes.SeqScanPlanNode;
@@ -82,7 +83,7 @@ public class TestPlansJoin extends PlannerTestCase {
                 PlanNodeType.SEND,
                 PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
-        assertEquals(4, pn.getOutputSchema().getColumns().size());
+        assertEquals(4, pn.getOutputSchema().size());
 
         for (JoinOp joinOp : JoinOp.JOIN_OPS) {
             perJoinOpTestBasicInnerJoin(joinOp);
@@ -98,25 +99,28 @@ public class TestPlansJoin extends PlannerTestCase {
         String query;
         String pattern;
         AbstractPlanNode pn;
-        List<SchemaColumn> selectColumns;
+        NodeSchema selectColumns;
 
         // SELECT * with ON clause should return all columns from all tables
         query = "SELECT * FROM R1 JOIN R2 ON R1.C" +
                 joinOp + "R2.C";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
 
         query = "SELECT R1.A, R1.C, D FROM R1 JOIN R2 ON R1.C" +
                 joinOp + "R2.C";
-        pn = compileToTopDownTree(query, 3, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 3,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
 
         query = "SELECT R1.A, C, R1.D FROM R1 JOIN R2 USING(C)";
-        pn = compileToTopDownTree(query, 3, PlanNodeType.SEND,
+        pn = compileToTopDownTree(query, 3,
+                PlanNodeType.SEND,
                 PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
@@ -127,9 +131,9 @@ public class TestPlansJoin extends PlannerTestCase {
                 PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
-        assertEquals("R1", selectColumns.get(0).getTableName());
-        assertEquals("R2", selectColumns.get(1).getTableName());
+        selectColumns = pn.getOutputSchema();
+        assertEquals("R1", selectColumns.getColumn(0).getTableName());
+        assertEquals("R2", selectColumns.getColumn(1).getTableName());
 
         // The output table for C can be either R1 or R2 because it's an INNER join
         query = "SELECT R1.A, C, R1.D FROM R1 JOIN R2 USING(C)";
@@ -137,11 +141,11 @@ public class TestPlansJoin extends PlannerTestCase {
                 PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
-        assertEquals("R1", selectColumns.get(0).getTableName());
-        String table = selectColumns.get(1).getTableName();
+        selectColumns = pn.getOutputSchema();
+        assertEquals("R1", selectColumns.getColumn(0).getTableName());
+        String table = selectColumns.getColumn(1).getTableName();
         assertTrue("R2".equals(table) || "R1".equals(table));
-        table = selectColumns.get(2).getTableName();
+        table = selectColumns.getColumn(2).getTableName();
         assertEquals("R1", table);
 
         query = "SELECT R2.C FROM R1 JOIN R2 ON R1.X" +
@@ -185,7 +189,6 @@ public class TestPlansJoin extends PlannerTestCase {
                 joinOp + "R2.C JOIN R3 ON R3.C" +
                 joinOp + "R2.C";
         pn = compileToTopDownTree(query, 7, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
@@ -263,11 +266,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1, R2 WHERE R1.A" +
                 joinOp + "R2.A AND R1.C > 0";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -285,12 +286,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1, R2 WHERE R1.A" +
                 joinOp + "R2.A AND R1.C > R2.C";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -314,12 +313,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 JOIN R2 ON R1.A" +
                 joinOp + "R2.A WHERE R1.C > 0";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -341,12 +338,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 JOIN R2 ON R1.A" +
                 joinOp + "R2.A WHERE R1.C > R2.C";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -371,14 +366,12 @@ public class TestPlansJoin extends PlannerTestCase {
                 joinOp + "R2.A AND R1.C" +
                 joinOp + "R3.C AND R1.A > 0";
         pn = compileToTopDownTree(query, 7, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -413,12 +406,10 @@ public class TestPlansJoin extends PlannerTestCase {
                 joinOp + "R2.A AND R1.C" +
                 joinOp + "R2.C WHERE R1.A > 0";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -490,14 +481,12 @@ public class TestPlansJoin extends PlannerTestCase {
                 joinOp + "R2.A JOIN R3 ON R1.C" +
                 joinOp + "R3.C WHERE R1.A > 0";
         pn = compileToTopDownTree(query, 7, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -538,13 +527,13 @@ public class TestPlansJoin extends PlannerTestCase {
         AbstractExpression predicate;
         SeqScanPlanNode seqScan;
         SchemaColumn sc0;
-        List<SchemaColumn> selectColumns;
+        NodeSchema selectColumns;
 
         query = "SELECT max(A) FROM R1 JOIN R2 USING(A)";
         pn = compileToTopDownTree(query, 1, PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
+        selectColumns = pn.getOutputSchema();
         for (SchemaColumn sc : selectColumns) {
             AbstractExpression e = sc.getExpression();
             assertTrue(e instanceof TupleValueExpression);
@@ -559,7 +548,7 @@ public class TestPlansJoin extends PlannerTestCase {
         pn = compileToTopDownTree(query, 1, PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
+        selectColumns = pn.getOutputSchema();
         for (SchemaColumn sc : selectColumns) {
             AbstractExpression e = sc.getExpression();
             assertTrue(e instanceof TupleValueExpression);
@@ -574,7 +563,7 @@ public class TestPlansJoin extends PlannerTestCase {
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
+        selectColumns = pn.getOutputSchema();
         for (SchemaColumn sc : selectColumns) {
             AbstractExpression e = sc.getExpression();
             assertTrue(e instanceof TupleValueExpression);
@@ -633,9 +622,9 @@ public class TestPlansJoin extends PlannerTestCase {
         lpn = compileToFragments(query);
         assertProjectingCoordinator(lpn);
         pn = lpn.get(0);
-        selectColumns = pn.getOutputSchema().getColumns();
+        selectColumns = pn.getOutputSchema();
         assertEquals(1, selectColumns.size());
-        sc0 = selectColumns.get(0);
+        sc0 = selectColumns.getColumn(0);
         assertEquals("AP1", sc0.getTableAlias());
         assertEquals("P1", sc0.getTableName());
 
@@ -658,9 +647,9 @@ public class TestPlansJoin extends PlannerTestCase {
         predicate = seqScan.getPredicate();
         assertExprTopDownTree(predicate, ExpressionType.COMPARE_GREATERTHAN,
                 ExpressionType.VALUE_TUPLE, ExpressionType.VALUE_CONSTANT);
-        selectColumns = seqScan.getOutputSchema().getColumns();
+        selectColumns = seqScan.getOutputSchema();
         assertEquals(1, selectColumns.size());
-        sc0 = selectColumns.get(0);
+        sc0 = selectColumns.getColumn(0);
         assertEquals("AP1", sc0.getTableAlias());
         assertEquals("P1", sc0.getTableName());
     }
@@ -685,11 +674,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.A" +
                 joinOp + "R2.A AND R2.A = 1 ";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getPreJoinPredicate();
@@ -721,11 +708,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R2 LEFT JOIN R1 ON R1.A" +
                 joinOp + "R2.A AND R2.A = 1 ";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getPreJoinPredicate();
@@ -747,11 +732,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.A" +
                 joinOp + "R2.A AND R2.C = 1 ";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getJoinPredicate();
@@ -762,12 +745,12 @@ public class TestPlansJoin extends PlannerTestCase {
         // joinOp + "R2.A AND ABS(R2.C) = 1
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.A" +
                 joinOp + "R2.A AND ABS(R2.C) = 1 ";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getJoinPredicate();
@@ -778,24 +761,23 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R3 ON R1.A" +
                 joinOp + "R3.A";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 null); // PlanNodeType.NESTLOOPINDEX,
                 // PlanNodeType.SEQSCAN); weakened for now
         if (joinOp == JoinOp.EQUAL) { // weaken test for now
             node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                    PlanNodeType.PROJECTION,
                     PlanNodeType.NESTLOOPINDEX);
         }
 
         // R1.A" + joinOp + "R3.A AND R1.A = 4 =>  R3.A = 4 AND R1.A = 4  -- NLJ/IndexScan
         query = "SELECT * FROM R1 LEFT JOIN R3 ON R1.A" +
                 joinOp + "R3.A AND R1.A = 4";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, null); // weakened for now
-        node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        node = followAssertedLeftChain(pn, true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getPreJoinPredicate();
@@ -821,12 +803,13 @@ public class TestPlansJoin extends PlannerTestCase {
         // R1.A" + joinOp + "R3.A AND R3.A = 4 =>  R3.A = 4 AND R1.A = 4  -- NLJ/IndexScan
         query = "SELECT * FROM R1 LEFT JOIN R3 ON R1.A" +
                 joinOp + "R3.A AND R3.A = 4";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.INDEXSCAN);
-        node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        node = followAssertedLeftChain(pn, true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getPreJoinPredicate();
@@ -872,11 +855,9 @@ public class TestPlansJoin extends PlannerTestCase {
 
         query = "SELECT * FROM R1, R2";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getJoinPredicate());
@@ -901,11 +882,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 JOIN R2 ON ABS(R1.A) " +
                 joinOp + " ABS(R2.A) ";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getJoinPredicate();
@@ -918,11 +897,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1, R2 WHERE ABS(R1.A) " +
                 joinOp + " ABS(R2.A) ";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN, PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn,PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getJoinPredicate();
@@ -1118,8 +1095,8 @@ public class TestPlansJoin extends PlannerTestCase {
 
         query = "SELECT * FROM R3 JOIN R1 ON R1.C" +
                 joinOp + "R3.A";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5, true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOPINDEX,
                 PlanNodeType.SEQSCAN);
 
@@ -1378,12 +1355,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(JoinType.LEFT, nlj.getJoinType());
@@ -1402,12 +1377,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C AND R1.A = 5";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(JoinType.LEFT, nlj.getJoinType());
@@ -1500,12 +1473,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -1526,12 +1497,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C AND R1.A > 0 AND R2.A < 0";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         predicate = nlj.getPreJoinPredicate();
@@ -1556,12 +1525,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C AND (R1.A > 0 OR R2.A < 0)";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -1605,12 +1572,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C WHERE R1.A > 0 AND R2.A IS NULL AND (R1.C > R2.C OR R2.C IS NULL)";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(JoinType.LEFT, nlj.getJoinType());
@@ -1643,12 +1608,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R3 LEFT JOIN R2 ON R3.A" +
                 joinOp + "R2.A WHERE R3.A > 3 AND R3.C < 0";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.INDEXSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(JoinType.LEFT, nlj.getJoinType());
@@ -1671,12 +1634,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R2 LEFT JOIN R3 ON R3.C" +
                 joinOp + "R2.C WHERE R3.A > 3";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.INDEXSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(JoinType.INNER, nlj.getJoinType());
@@ -1701,11 +1662,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R2 LEFT JOIN R3 ON R3.A" +
                 joinOp + "R2.C WHERE R3.A > 3";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX);
         NestLoopIndexPlanNode nlij = (NestLoopIndexPlanNode) node;
         assertEquals(JoinType.INNER, nlij.getJoinType());
@@ -1783,12 +1742,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R3 LEFT JOIN R2 ON R3.A" +
                 joinOp + "R2.C";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(JoinType.LEFT, nlj.getJoinType());
@@ -1835,11 +1792,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R2 LEFT JOIN R3 ON R2.C" +
                 joinOp + "R3.A";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX);
         nlij = (NestLoopIndexPlanNode) node;
         assertEquals(JoinType.LEFT, nlij.getJoinType());
@@ -1879,11 +1834,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R2 LEFT JOIN R3 ON R3.A" +
                 joinOp + "R2.A AND R3.C > 0 AND R2.A < 6";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX);
         nlij = (NestLoopIndexPlanNode) node;
         assertEquals(JoinType.LEFT, nlij.getJoinType());
@@ -1913,12 +1866,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R2 LEFT JOIN R3 ON R3.C" +
                 joinOp + "R2.A AND R3.A > 0 AND R3.C != 0 AND R2.A < 6";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.INDEXSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(JoinType.LEFT, nlj.getJoinType());
@@ -1947,11 +1898,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R2 LEFT JOIN R3 ON R3.A" +
                 joinOp + "R2.A WHERE R3.A IS NULL AND R2.A > 3 AND (R2.A < 6 OR R3.C IS NULL)";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX);
         nlij = (NestLoopIndexPlanNode) node;
         assertEquals(nlij.getJoinType(), JoinType.LEFT);
@@ -2070,7 +2019,6 @@ public class TestPlansJoin extends PlannerTestCase {
         assertReplicatedLeftJoinCoordinator(lpn, "R3");
         pn = lpn.get(0);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertNull(nlj.getPreJoinPredicate());
@@ -2168,13 +2116,15 @@ public class TestPlansJoin extends PlannerTestCase {
 
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C WHERE R2.C IS NOT NULL";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
-        node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        node = followAssertedLeftChain(pn,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.INNER);
@@ -2195,38 +2145,37 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 RIGHT JOIN R2 ON R1.C" +
                 joinOp + "R2.C WHERE R1.C > 0";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                 PlanNodeType.PROJECTION,
                  PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.INNER);
 
         query = "SELECT * FROM R1 LEFT JOIN R3 ON R1.C" +
                 joinOp + "R3.C WHERE R3.A > 0";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.INDEXSCAN);
-        node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                 PlanNodeType.PROJECTION,
-                 PlanNodeType.NESTLOOP);
+        node = followAssertedLeftChain(pn,
+                    true,
+                    PlanNodeType.SEND,
+                    PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.INNER);
 
         query = "SELECT * FROM R1 LEFT JOIN R3 ON R1.C" +
                 joinOp + "R3.A WHERE R3.A > 0";
         if (joinOp == JoinOp.EQUAL) { // weaken test for now
-           pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
-                PlanNodeType.NESTLOOPINDEX,
-                PlanNodeType.SEQSCAN);
+           pn = compileToTopDownTree(query, 5,
+                   PlanNodeType.SEND,
+                   PlanNodeType.NESTLOOPINDEX,
+                   PlanNodeType.SEQSCAN);
            node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                   PlanNodeType.PROJECTION,
                    PlanNodeType.NESTLOOPINDEX);
             nlij = (NestLoopIndexPlanNode) node;
             assertEquals(nlij.getJoinType(), JoinType.INNER);
@@ -2247,27 +2196,31 @@ public class TestPlansJoin extends PlannerTestCase {
 
         query = "SELECT * FROM R1 RIGHT JOIN R2 ON R1.C" +
                 joinOp + "R2.C WHERE ABS(R1.C) < 10";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
-                PlanNodeType.NESTLOOP,
-                PlanNodeType.SEQSCAN,
-                PlanNodeType.SEQSCAN);
-        node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                 PlanNodeType.PROJECTION,
-                 PlanNodeType.NESTLOOP);
+        pn = compileToTopDownTree(query, 5,
+                    true,
+                    PlanNodeType.SEND,
+                    PlanNodeType.NESTLOOP,
+                    PlanNodeType.SEQSCAN,
+                    PlanNodeType.SEQSCAN);
+        node = followAssertedLeftChain(pn,
+                    true,
+                    PlanNodeType.SEND,
+                    PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.INNER);
 
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C WHERE ABS(R1.C) < 10";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
-        node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                 PlanNodeType.PROJECTION,
-                 PlanNodeType.NESTLOOP);
+        node = followAssertedLeftChain(pn,
+                true,
+                PlanNodeType.SEND,
+                PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.LEFT);
 
@@ -2286,13 +2239,15 @@ public class TestPlansJoin extends PlannerTestCase {
 
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C WHERE ABS(R2.C) < 10 AND R1.C = 3";
-        pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 5,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
-        node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                 PlanNodeType.PROJECTION,
+        node = followAssertedLeftChain(pn,
+                 true,
+                 PlanNodeType.SEND,
                  PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.INNER);
@@ -2313,12 +2268,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C WHERE ABS(R1.C) <  10 AND R1.C > 3";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                 PlanNodeType.PROJECTION,
                  PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.LEFT);
@@ -2326,12 +2279,10 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 LEFT JOIN R2 ON R1.C" +
                 joinOp + "R2.C WHERE ABS(R1.C) <  10 OR R2.C IS NOT NULL";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                 PlanNodeType.PROJECTION,
                  PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.LEFT);
@@ -2339,15 +2290,17 @@ public class TestPlansJoin extends PlannerTestCase {
         // Test with seqscan with different filers.
         query = "SELECT R2.A, R1.* FROM R1 LEFT OUTER JOIN R2 ON R2.A" +
                 joinOp + "R1.A WHERE R2.A > 3";
-        pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        pn = compileToTopDownTree(query, 4,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
         //* enable for debug */ System.out.println(pn.toExplainPlanString());
-        node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                 PlanNodeType.PROJECTION,
-                 PlanNodeType.NESTLOOP);
+        node = followAssertedLeftChain(pn,
+                    true,
+                    PlanNodeType.SEND,
+                    PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(nlj.getJoinType(), JoinType.INNER);
         assertNull(nlj.getPreJoinPredicate());
@@ -2550,7 +2503,6 @@ public class TestPlansJoin extends PlannerTestCase {
 
         query = "SELECT lr.a a, rr.a FROM r1 lr JOIN r1 rr using (a) ORDER BY a;";
         compileToTopDownTree(query, 2, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.ORDERBY,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
@@ -2576,7 +2528,6 @@ public class TestPlansJoin extends PlannerTestCase {
         // is expanded.
         query = "SELECT * FROM R2, R1";
         compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
@@ -2778,7 +2729,7 @@ public class TestPlansJoin extends PlannerTestCase {
         OrderByPlanNode orderBy;
         NestLoopPlanNode nlj;
         AggregatePlanNode aggr;
-        List<SchemaColumn> selectColumns;
+        NodeSchema selectColumns;
         SchemaColumn col;
         AbstractExpression colExp;
         AbstractExpression predicate;
@@ -2833,8 +2784,8 @@ public class TestPlansJoin extends PlannerTestCase {
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
-        col = selectColumns.get(0);
+        selectColumns = pn.getOutputSchema();
+        col = selectColumns.getColumn(0);
         assertEquals("C", col.getColumnAlias());
         colExp = col.getExpression();
         assertEquals(ExpressionType.VALUE_TUPLE, colExp.getExpressionType());
@@ -2848,9 +2799,9 @@ public class TestPlansJoin extends PlannerTestCase {
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
+        selectColumns = pn.getOutputSchema();
         assertEquals(1, selectColumns.size());
-        col = selectColumns.get(0);
+        col = selectColumns.getColumn(0);
         assertEquals("C", col.getColumnAlias());
         colExp = col.getExpression();
         assertEquals(ExpressionType.VALUE_TUPLE, colExp.getExpressionType());
@@ -2862,9 +2813,9 @@ public class TestPlansJoin extends PlannerTestCase {
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
+        selectColumns = pn.getOutputSchema();
         assertEquals(1, selectColumns.size());
-        col = selectColumns.get(0);
+        col = selectColumns.getColumn(0);
         assertEquals("C", col.getColumnAlias());
         colExp = col.getExpression();
         assertEquals(ExpressionType.VALUE_TUPLE, colExp.getExpressionType());
@@ -2876,9 +2827,9 @@ public class TestPlansJoin extends PlannerTestCase {
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.SEQSCAN);
-        selectColumns = pn.getOutputSchema().getColumns();
+        selectColumns = pn.getOutputSchema();
         assertEquals(1, selectColumns.size());
-        col = selectColumns.get(0);
+        col = selectColumns.getColumn(0);
         assertEquals("C", col.getColumnAlias());
         colExp = col.getExpression();
         assertEquals(ExpressionType.VALUE_TUPLE, colExp.getExpressionType());
@@ -2968,11 +2919,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R1 JOIN R3 ON R3.A" +
                 joinOp + "R1.A WHERE R3.C = 0";
         pn = compileToTopDownTree(query, 5, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX,
                 PlanNodeType.SEQSCAN);
         seqScan = (SeqScanPlanNode) node;
@@ -2998,11 +2947,9 @@ public class TestPlansJoin extends PlannerTestCase {
         query = "SELECT * FROM R3 JOIN R2 ON R3.C" +
                 joinOp + "R2.C WHERE R2.C > 100;";
         pn = compileToTopDownTree(query, 4, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX,
                 PlanNodeType.SEQSCAN);
         node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
                 PlanNodeType.NESTLOOPINDEX);
         nlij = (NestLoopIndexPlanNode) node;
         indexScan = nlij.getInlineIndexScan();

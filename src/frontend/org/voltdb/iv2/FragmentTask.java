@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -35,6 +35,7 @@ import org.voltdb.VoltType;
 import org.voltdb.client.BatchTimeoutOverrideType;
 import org.voltdb.exceptions.EEException;
 import org.voltdb.exceptions.InterruptException;
+import org.voltdb.exceptions.ReplicatedTableException;
 import org.voltdb.exceptions.SQLException;
 import org.voltdb.jni.ExecutionEngine;
 import org.voltdb.messaging.FastDeserializer;
@@ -152,6 +153,10 @@ public class FragmentTask extends TransactionTask
 
             // execute the procedure
             final FragmentResponseMessage response = processFragmentTask(siteConnection);
+
+            //The fragment is not misrouted and the site may have been marked as non-leader via @MigratePartitionLeader
+            //but it should be processed by the same site, act like a leader.
+            response.setForOldLeader(m_fragmentMsg.isForOldLeader());
             deliverResponse(response);
         } finally {
             if (BatchTimeoutOverrideType.isUserSetTimeout(individualTimeout)) {
@@ -370,6 +375,15 @@ public class FragmentTask extends TransactionTask
                 }
                 break;
             } catch (final SQLException e) {
+                hostLog.l7dlog( Level.TRACE, LogKeys.host_ExecutionSite_ExceptionExecutingPF.name(), new Object[] { Encoder.hexEncode(planHash) }, e);
+                currentFragResponse.setStatus(FragmentResponseMessage.UNEXPECTED_ERROR, e);
+                if (currentFragResponse.getTableCount() == 0) {
+                    // Make sure the response has at least 1 result with a valid DependencyId
+                    currentFragResponse.addDependency(new DependencyPair.BufferDependencyPair(outputDepId,
+                            m_rawDummyResult, 0, m_rawDummyResult.length));
+                }
+                break;
+            } catch (final ReplicatedTableException e) {
                 hostLog.l7dlog( Level.TRACE, LogKeys.host_ExecutionSite_ExceptionExecutingPF.name(), new Object[] { Encoder.hexEncode(planHash) }, e);
                 currentFragResponse.setStatus(FragmentResponseMessage.UNEXPECTED_ERROR, e);
                 if (currentFragResponse.getTableCount() == 0) {

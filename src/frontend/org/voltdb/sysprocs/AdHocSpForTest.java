@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -51,7 +51,7 @@ public class AdHocSpForTest extends AdHocNTBase {
             userParams = Arrays.copyOfRange(paramArray, 2, paramArray.length);
         }
 
-        List<String> sqlStatements = SQLLexer.splitStatements(sql);
+        List<String> sqlStatements = SQLLexer.splitStatements(sql).getCompletelyParsedStmts();
         if (sqlStatements.size() != 1) {
             return makeQuickResponse(
                     ClientResponse.GRACEFUL_FAILURE,
@@ -73,10 +73,11 @@ public class AdHocSpForTest extends AdHocNTBase {
 
         return runNonDDLAdHoc(VoltDB.instance().getCatalogContext(),
                               sqlStatements,
-                              false,
+                              false, // Do not infer partitioning
                               userPartitionKey,
                               ExplainMode.NONE,
-                              false,
+                              false, // not a large query
+                              false, // not swap tables
                               userParams);
     }
 }

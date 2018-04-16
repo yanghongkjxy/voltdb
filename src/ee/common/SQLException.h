@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -47,6 +47,7 @@ public:
     static const char* volt_output_buffer_overflow;
     static const char* volt_temp_table_memory_overflow;
     static const char* volt_decimal_serialization_error;
+    static const char* volt_user_defined_function_error;
 
     SQLException(std::string sqlState, std::string message);
     SQLException(std::string sqlState, int error_no, std::string message);

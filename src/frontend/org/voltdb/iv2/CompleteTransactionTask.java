@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -175,12 +175,7 @@ public class CompleteTransactionTask extends TransactionTask
                               "fragment: " + fragment.toString());
             }
             StoredProcedureInvocation invocation = initiateTask.getStoredProcedureInvocation().getShallowCopy();
-            drGateway.onSuccessfulMPCall(m_txnState.m_spHandle,
-                    m_txnState.txnId,
-                    m_txnState.uniqueId,
-                    m_completeMsg.getHash(),
-                    invocation,
-                    m_txnState.getResults());
+            drGateway.onSuccessfulMPCall(invocation);
         }
     }
 

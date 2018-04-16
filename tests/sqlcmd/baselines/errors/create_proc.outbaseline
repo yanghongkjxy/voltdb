@@ -20,6 +20,7 @@ create procedure from class sqlcmdtest.Trivial;
 @GC                       
 @GetPartitionKeys         	varchar
 @Pause                    
+@Ping                     
 @Promote                  
 @Quiesce                  
 @ResetDR                  	tinyint, tinyint, tinyint
@@ -54,11 +55,13 @@ Command succeeded.
 
 --- Potential Procedure Classes ------------------------------
  sqlcmdtest.BadSwap                    
+ sqlcmdtest.BoxedInsertEmployee        
  sqlcmdtest.Breakable0                 
  sqlcmdtest.Breakable1                 
  sqlcmdtest.Breakable2                 
  sqlcmdtest.InsertEmployee             
  sqlcmdtest.Trivial                    
+ sqlcmdtest.UsesUDF                    
 
 --- Non-Procedure Classes ------------------------------------
  sqlcmdtest.Breakable1$NestedGetsKilled
@@ -71,6 +74,7 @@ Command succeeded.
 @GC                       
 @GetPartitionKeys         	varchar
 @Pause                    
+@Ping                     
 @Promote                  
 @Quiesce                  
 @ResetDR                  	tinyint, tinyint, tinyint
@@ -108,6 +112,7 @@ Command succeeded.
 @GC                       
 @GetPartitionKeys         	varchar
 @Pause                    
+@Ping                     
 @Promote                  
 @Quiesce                  
 @ResetDR                  	tinyint, tinyint, tinyint
@@ -140,10 +145,12 @@ Trivial
 
 --- Potential Procedure Classes ------------------------------
  sqlcmdtest.BadSwap                    
+ sqlcmdtest.BoxedInsertEmployee        
  sqlcmdtest.Breakable0                 
  sqlcmdtest.Breakable1                 
  sqlcmdtest.Breakable2                 
  sqlcmdtest.InsertEmployee             
+ sqlcmdtest.UsesUDF                    
 
 --- Active Procedure Classes ---------------------------------
  sqlcmdtest.Trivial                    
@@ -160,10 +167,12 @@ remove classes sqlcmdtest.*;
 
 --- Potential Procedure Classes ------------------------------
  sqlcmdtest.BadSwap                    
+ sqlcmdtest.BoxedInsertEmployee        
  sqlcmdtest.Breakable0                 
  sqlcmdtest.Breakable1                 
  sqlcmdtest.Breakable2                 
  sqlcmdtest.InsertEmployee             
+ sqlcmdtest.UsesUDF                    
 
 --- Active Procedure Classes ---------------------------------
  sqlcmdtest.Trivial                    
@@ -189,6 +198,7 @@ create procedure from class sqlcmdtest.Trivial;
 @GC                       
 @GetPartitionKeys         	varchar
 @Pause                    
+@Ping                     
 @Promote                  
 @Quiesce                  
 @ResetDR                  	tinyint, tinyint, tinyint
@@ -225,11 +235,13 @@ Command succeeded.
 
 --- Potential Procedure Classes ------------------------------
  sqlcmdtest.BadSwap                    
+ sqlcmdtest.BoxedInsertEmployee        
  sqlcmdtest.Breakable0                 
  sqlcmdtest.Breakable1                 
  sqlcmdtest.Breakable2                 
  sqlcmdtest.InsertEmployee             
  sqlcmdtest.Trivial                    
+ sqlcmdtest.UsesUDF                    
 
 --- Non-Procedure Classes ------------------------------------
  sqlcmdtest.Breakable1$NestedGetsKilled
@@ -245,6 +257,7 @@ Command succeeded.
 @GC                       
 @GetPartitionKeys         	varchar
 @Pause                    
+@Ping                     
 @Promote                  
 @Quiesce                  
 @ResetDR                  	tinyint, tinyint, tinyint
@@ -277,10 +290,12 @@ Breakable0
 
 --- Potential Procedure Classes ------------------------------
  sqlcmdtest.BadSwap                    
+ sqlcmdtest.BoxedInsertEmployee        
  sqlcmdtest.Breakable1                 
  sqlcmdtest.Breakable2                 
  sqlcmdtest.InsertEmployee             
  sqlcmdtest.Trivial                    
+ sqlcmdtest.UsesUDF                    
 
 --- Active Procedure Classes ---------------------------------
  sqlcmdtest.Breakable0                 
@@ -309,6 +324,7 @@ Command succeeded.
 @GC                       
 @GetPartitionKeys         	varchar
 @Pause                    
+@Ping                     
 @Promote                  
 @Quiesce                  
 @ResetDR                  	tinyint, tinyint, tinyint
@@ -354,11 +370,13 @@ Command succeeded.
 
 --- Potential Procedure Classes ------------------------------
  sqlcmdtest.BadSwap                    
+ sqlcmdtest.BoxedInsertEmployee        
  sqlcmdtest.Breakable0                 
  sqlcmdtest.Breakable1                 
  sqlcmdtest.Breakable2                 
  sqlcmdtest.InsertEmployee             
  sqlcmdtest.Trivial                    
+ sqlcmdtest.UsesUDF                    
 
 --- Non-Procedure Classes ------------------------------------
  sqlcmdtest.Breakable1$NestedGetsKilled
@@ -374,6 +392,7 @@ Command succeeded.
 @GC                       
 @GetPartitionKeys         	varchar
 @Pause                    
+@Ping                     
 @Promote                  
 @Quiesce                  
 @ResetDR                  	tinyint, tinyint, tinyint
@@ -406,10 +425,12 @@ Breakable0
 
 --- Potential Procedure Classes ------------------------------
  sqlcmdtest.BadSwap                    
+ sqlcmdtest.BoxedInsertEmployee        
  sqlcmdtest.Breakable1                 
  sqlcmdtest.Breakable2                 
  sqlcmdtest.InsertEmployee             
  sqlcmdtest.Trivial                    
+ sqlcmdtest.UsesUDF                    
 
 --- Active Procedure Classes ---------------------------------
  sqlcmdtest.Breakable0                 
@@ -438,6 +459,7 @@ Command succeeded.
 @GC                       
 @GetPartitionKeys         	varchar
 @Pause                    
+@Ping                     
 @Promote                  
 @Quiesce                  
 @ResetDR                  	tinyint, tinyint, tinyint

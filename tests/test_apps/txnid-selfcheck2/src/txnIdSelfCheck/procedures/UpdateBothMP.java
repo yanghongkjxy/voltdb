@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -29,9 +29,9 @@ import org.voltdb.utils.MiscUtils;
 public class UpdateBothMP extends ReplicatedUpdateBaseProc {
 
     public VoltTable[] run(byte cid, long rid, byte[] value, byte rollback) {
-        VoltTable[] results1 = doWork(p_getCIDData, p_cleanUp, p_insert, p_export, p_getAdhocData, p_getViewData,
+        VoltTable[] results1 = doWork(p_getCIDData, p_cleanUp, p_insert, p_update, p_export, p_getAdhocData, p_getViewData,
                 cid, rid, value, rollback, true);
-        VoltTable[] results2 = doWork(r_getCIDData, r_cleanUp, r_insert, r_export, r_getAdhocData, r_getViewData,
+        VoltTable[] results2 = doWork(r_getCIDData, r_cleanUp, r_insert, r_update, r_export, r_getAdhocData, r_getViewData,
                 cid, rid, value, rollback, false);
 
         assert(results1.length == 3);

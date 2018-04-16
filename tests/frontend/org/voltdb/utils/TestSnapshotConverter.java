@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -30,8 +30,6 @@ import java.io.LineNumberReader;
 import java.util.Calendar;
 import java.util.Random;
 
-import junit.framework.Test;
-
 import org.voltdb.BackendTarget;
 import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
@@ -41,6 +39,8 @@ import org.voltdb.compiler.VoltProjectBuilder;
 import org.voltdb.regressionsuites.LocalCluster;
 import org.voltdb.regressionsuites.MultiConfigSuiteBuilder;
 import org.voltdb.regressionsuites.SaveRestoreBase;
+
+import junit.framework.Test;
 
 public class TestSnapshotConverter extends SaveRestoreBase
 {
@@ -52,7 +52,6 @@ public class TestSnapshotConverter extends SaveRestoreBase
     // Regression test for ENG-8609
     public void testSnapshotConverter() throws NoConnectionsException, IOException, ProcCallException
     {
-        if (!MiscUtils.isPro()) { return; } // not supported in community
         if (isValgrind()) return;
 
         Client client = getClient();

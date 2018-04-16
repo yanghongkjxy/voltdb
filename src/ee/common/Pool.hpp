@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -288,18 +288,21 @@ private:
     Pool(const Pool&);
     Pool& operator=(const Pool&);
 };
-#else
+#else // for MEMCHECK builds
 /**
  * A debug version of the memory pool that does each allocation on the heap keeps a list for when purge is called
  */
 class Pool {
 public:
     Pool()
+        : m_allocations()
+        , m_memTotal(0)
     {
     }
 
-    Pool(uint64_t allocationSize, uint64_t maxChunkCount) :
-        m_memTotal(0)
+    Pool(uint64_t allocationSize, uint64_t maxChunkCount)
+        : m_allocations()
+        , m_memTotal(0)
     {
     }
 

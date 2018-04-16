@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -19,14 +19,9 @@
 
 #include "operatorexpression.h"
 
-#include "common/debuglog.h"
 #include "common/executorcontext.hpp"
-#include "common/NValue.hpp"
-#include "common/ValuePeeker.hpp"
 
-#include "common/tabletuple.h"
 #include "storage/table.h"
-#include "storage/tableiterator.h"
 
 
 namespace voltdb {

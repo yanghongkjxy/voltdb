@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -191,16 +191,18 @@ public class SysProcFragmentId
     public static final long PF_loadVoltTableAggregate = 271;
 
     // @ResetDR
-    public static final long PF_preResetDR = 280;
-    public static final long PF_preResetDRAggregate = 281;
-    public static final long PF_postResetDR = 282;
-    public static final long PF_postResetDRAggregate = 283;
+    public static final long PF_resetDR = 280;
+    public static final long PF_resetDRAggregate = 281;
 
     // @ResetDRSingle
-    public static final long PF_preResetDRSingle = 284;
-    public static final long PF_preResetDRSingleAggregate = 285;
-    public static final long PF_postResetDRSingle = 286;
-    public static final long PF_postResetDRSingleAggregate = 287;
+    public static final long PF_preResetDRSingle = 282;
+    public static final long PF_preResetDRSingleAggregate = 283;
+    public static final long PF_postResetDRSingle = 284;
+    public static final long PF_postResetDRSingleAggregate = 285;
+
+    // @DropDRSelf
+    public static final long PF_DropDRSelf = 286;
+    public static final long PF_DropDRSelfAggregate = 287;
 
     // @ExecuteTask
     public static final long PF_executeTask = 290;
@@ -219,4 +221,8 @@ public class SysProcFragmentId
     // @SwapTables
     public static final long PF_swapTables = 320;
     public static final long PF_swapTablesAggregate = 321;
+
+    // @PingPartitions
+    public static final long PF_pingPartitions = 330;
+    public static final long PF_pingPartitionsAggregate = 331;
 }

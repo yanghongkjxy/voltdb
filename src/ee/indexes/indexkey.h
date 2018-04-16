@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -371,6 +371,11 @@ struct IntsComparator
         }
         return 0;
     }
+
+    // This method is provided to be compatible with ComparatorWithPointer.
+    int compareWithoutPointer(const IntsKey<keySize> &lhs, const IntsKey<keySize> &rhs) const {
+        return operator()(lhs, rhs);
+    }
 };
 
 /**
@@ -510,7 +515,7 @@ struct GenericPersistentKey : public GenericKey<keySize>
             // The NULL argument means use the persistent memory pool for the varchar
             // allocation rather than any particular COW context's pool.
             // XXX: Could this ever somehow interact badly with a COW context?
-            keyTuple.setNValueAllocateForObjectCopies(ii, indexedValue, NULL);
+            keyTuple.setNValueAllocateForObjectCopies(ii, indexedValue);
         }
     }
 
@@ -600,6 +605,11 @@ struct GenericComparator
         TableTuple rhTuple(m_keySchema); rhTuple.moveToReadOnlyTuple(reinterpret_cast<const void*>(&rhs));
         // lexographical compare could be faster for fixed N
         return lhTuple.compare(rhTuple);
+    }
+
+    // This method is provided to be compatible with ComparatorWithPointer.
+    int compareWithoutPointer(const GenericKey<keySize> &lhs, const GenericKey<keySize> &rhs) const {
+        return operator()(lhs, rhs);
     }
 private:
     const TupleSchema *m_keySchema;
@@ -762,6 +772,12 @@ struct TupleKeyComparator
         }
         return VALUE_COMPARE_EQUAL;
     }
+
+    // This method is provided to be compatible with ComparatorWithPointer.
+    int compareWithoutPointer(const TupleKey &lhs, const TupleKey &rhs) const {
+        return operator()(lhs, rhs);
+    }
+
 private:
     const TupleSchema *m_keySchema;
 };
@@ -838,6 +854,11 @@ struct ComparatorWithPointer : public KeyType::KeyComparator {
     int operator()(const KeyWithPointer<KeyType> &lhs, const KeyWithPointer<KeyType> &rhs) const {
         int rv = KeyType::KeyComparator::operator()(lhs, rhs);
         return rv == 0 ? comparePointer(lhs.m_keyTuple, rhs.m_keyTuple) : rv;
+    }
+
+    // Do a comparison, but don't compare pointers to tuple storage.
+    int compareWithoutPointer(const KeyWithPointer<KeyType> &lhs, const KeyWithPointer<KeyType> &rhs) const {
+        return KeyType::KeyComparator::operator()(lhs, rhs);
     }
 };
 

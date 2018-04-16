@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -384,7 +384,7 @@ class SchemaPageTest extends TestBase {
         waitFor(waitTime) {
             footer.banner.isDisplayed()
             footer.text.isDisplayed()
-            footer.text.text().toLowerCase().contains("Copyright (C) 2008-2017 VoltDB Inc. All rights reserved.".toLowerCase())
+            footer.text.text().toLowerCase().contains("Copyright (C) 2008-2018 VoltDB Inc. All rights reserved.".toLowerCase())
         }
     }
 
@@ -1349,6 +1349,23 @@ class SchemaPageTest extends TestBase {
         waitFor(waitTime) { page.downloadButton.isDisplayed() }
         then: 'check if download button is correct'
         page.downloadButton.text().equals("Download")
+    }
+
+    def ddlSourceTabClickDownloadButton() {
+        when: 'go to ddl source tab'
+        page.openSchemaPageDdlSourceTab()
+        then: 'at ddl source tab'
+        at SchemaPageDdlSourceTab
+
+        when: 'check if download button is present'
+        waitFor(waitTime) { page.downloadButton.isDisplayed() }
+        then: 'check if download button is correct'
+        page.downloadButton.text().equals("Download")
+
+        when: 'click download button'
+        page.downloadButton.click()
+        then: 'check download is clicked or not'
+        println("Download button is clicked without any error")
     }
 
     def ddlSourceTabCheckContent() {

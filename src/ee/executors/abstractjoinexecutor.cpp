@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -44,10 +44,7 @@
  */
 #include "abstractjoinexecutor.h"
 #include "executors/aggregateexecutor.h"
-#include "executors/executorutil.h"
-#include "execution/ProgressMonitorProxy.h"
 #include "plannodes/abstractjoinnode.h"
-#include "storage/table.h"
 
 using namespace std;
 using namespace voltdb;
@@ -73,7 +70,7 @@ void AbstractJoinExecutor::p_init_null_tuples(Table* outer_table, Table* inner_t
 }
 
 bool AbstractJoinExecutor::p_init(AbstractPlanNode* abstract_node,
-                              TempTableLimits* limits)
+                                  const ExecutorVector& executorVector)
 {
     VOLT_TRACE("Init AbstractJoinExecutor Executor");
 
@@ -84,7 +81,7 @@ bool AbstractJoinExecutor::p_init(AbstractPlanNode* abstract_node,
     assert(m_joinType == JOIN_TYPE_INNER || m_joinType == JOIN_TYPE_LEFT || m_joinType == JOIN_TYPE_FULL);
 
     // Create output table based on output schema from the plan
-    setTempOutputTable(limits);
+    setTempOutputTable(executorVector);
     assert(m_tmpOutputTable);
 
     // Inline aggregation can be serial, partial or hash

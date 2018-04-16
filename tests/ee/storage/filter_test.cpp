@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -50,6 +50,9 @@
  */
 
 #include "harness.h"
+
+#include "test_utils/UniqueTable.hpp"
+
 #include "common/common.h"
 #include "common/valuevector.h"
 #include "common/ValueFactory.hpp"
@@ -70,10 +73,7 @@ class FilterTest : public Test {
 public:
     FilterTest() {}
 
-    static Table* initTable()
-    {
-        CatalogId database_id = 1000;
-
+    UniqueTable<TempTable> initTable() {
         std::vector<std::string> columnNames(5);
         std::vector<voltdb::ValueType> columnTypes;
         std::vector<int32_t> columnLengths;
@@ -89,7 +89,7 @@ public:
         }
         TupleSchema *schema = TupleSchema::createTupleSchemaForTest(columnTypes, columnLengths, columnAllowNull);
 
-        Table* table = TableFactory::getTempTable(database_id, "test_table", schema, columnNames, NULL);
+        auto table = makeUniqueTable(TableFactory::buildTempTable("test_table", schema, columnNames, NULL));
 
         //::printf("making a test table...\n");
         TableTuple &tuple = table->tempTuple();
@@ -105,10 +105,10 @@ public:
         return table;
     };
 
-    static int countMatches(AbstractExpression* predicate) {
+    int countMatches(Table* table, AbstractExpression* predicate) {
         int count = 0;
-        TableIterator iter = m_table_static->iterator();
-        TableTuple match(m_table_static->schema());
+        TableIterator iter = table->iterator();
+        TableTuple match(table->schema());
         while (iter.next(match)) {
             if (predicate->eval(&match, NULL).isTrue()) {
                 //::printf("  match:%s\n", match->debug(table).c_str());
@@ -118,16 +118,10 @@ public:
         return count;
     }
 
-    static PlannerDomValue emptyDom() { return m_emptyRoot.rootObject(); }
-
-private:
-    static boost::scoped_ptr<Table> m_table_static;
-    static PlannerDomRoot m_emptyRoot;
+    PlannerDomValue emptyDom() {
+        return PlannerDomRoot("{}").rootObject();
+    }
 };
-
-boost::scoped_ptr<Table> FilterTest::m_table_static(FilterTest::initTable());
-// An empty JSON object to get simple (non-quantified) behavior from comparators
-PlannerDomRoot FilterTest::m_emptyRoot("{}");
 
 TEST_F(FilterTest, SimpleFilter) {
     // WHERE id = 20
@@ -139,8 +133,8 @@ TEST_F(FilterTest, SimpleFilter) {
     // delete the root to destroy the full tree.
     boost::scoped_ptr<AbstractExpression> pred_guard(predicate);
 
-    // ::printf("\nFilter:%s\n", predicate->debug().c_str());
-    int count = countMatches(predicate);
+    auto table = initTable();
+    int count = countMatches(table.get(), predicate);
     ASSERT_EQ(1, count);
 }
 
@@ -157,8 +151,8 @@ TEST_F(FilterTest, FunctionAbs1Filter) {
     // delete the root to destroy the full tree.
     boost::scoped_ptr<AbstractExpression> pred_guard(predicate);
 
-    // ::printf("\nFilter:%s\n", predicate->debug().c_str());
-    int count = countMatches(predicate);
+    auto table = initTable();
+    int count = countMatches(table.get(), predicate);
     ASSERT_EQ(1, count);
 }
 
@@ -179,8 +173,8 @@ TEST_F(FilterTest, FunctionAbs2Filter) {
     // delete the root to destroy the full tree.
     boost::scoped_ptr<AbstractExpression> pred_guard(predicate);
 
-    // ::printf("\nFilter:%s\n", predicate->debug().c_str());
-    int count = countMatches(predicate);
+    auto table = initTable();
+    int count = countMatches(table.get(), predicate);
     ASSERT_EQ(1, count);
 }
 
@@ -203,8 +197,8 @@ TEST_F(FilterTest, OrFilter) {
     // delete the root to destroy the full tree.
     boost::scoped_ptr<AbstractExpression> pred_guard(predicate);
 
-    // ::printf("\nFilter:%s\n", predicate->debug().c_str());
-    int count = countMatches(predicate);
+    auto table = initTable();
+    int count = countMatches(table.get(), predicate);
     ASSERT_EQ(2, count);
 }
 
@@ -225,8 +219,8 @@ TEST_F(FilterTest, AndFilter) {
     // delete the root to destroy the full tree.
     boost::scoped_ptr<AbstractExpression> pred_guard(predicate);
 
-    // ::printf("\nFilter:%s\n", predicate->debug().c_str());
-    int count = countMatches(predicate);
+    auto table = initTable();
+    int count = countMatches(table.get(), predicate);
     ASSERT_EQ(10, count);
 }
 
@@ -261,8 +255,8 @@ TEST_F(FilterTest, ComplexFilter) {
     // delete the root to destroy the full tree.
     boost::scoped_ptr<AbstractExpression> pred_guard(predicate);
 
-    // ::printf("\nFilter:%s\n", predicate->debug().c_str());
-    int count = countMatches(predicate);
+    auto table = initTable();
+    int count = countMatches(table.get(), predicate);
     ASSERT_EQ(5, count);
 }
 
@@ -285,20 +279,18 @@ TEST_F(FilterTest, SubstituteFilter) {
     // delete the root to destroy the full tree.
     boost::scoped_ptr<AbstractExpression> pred_guard(predicate);
 
-    // ::printf("\nFilter:%s\n", predicate->debug().c_str());
-
+    auto table = initTable();
     for (int64_t implantedValue = 1; implantedValue < 5; ++implantedValue) {
         params[0] = ValueFactory::getBigIntValue(implantedValue);
         // ::printf("\nSubstituted Filter:%s\n", predicate->debug().c_str());
         // ::printf("\tLEFT:  %s\n", predicate->getLeft()->debug().c_str());
         // ::printf("\tRIGHT: %s\n", predicate->getRight()->debug().c_str());
 
-        int count = countMatches(predicate);
+        int count = countMatches(table.get(), predicate);
         ASSERT_EQ(3, count);
     }
 }
 
 int main() {
-    int ret = TestSuite::globalInstance()->runAll();
-    return ret;
+    return TestSuite::globalInstance()->runAll();
 }

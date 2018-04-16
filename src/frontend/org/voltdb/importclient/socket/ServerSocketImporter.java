@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -21,6 +21,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -65,7 +66,7 @@ public class ServerSocketImporter extends AbstractImporter {
     }
 
     @Override
-    protected void stop()
+    public void stop()
     {
         try {
             m_config.getServerSocket().close();
@@ -88,7 +89,12 @@ public class ServerSocketImporter extends AbstractImporter {
                 ch.start();
             }
         } catch(IOException e) {
-           warn(e, "Unexpected error accepting client connections for " + getName() + " on port " + m_config.getPort());
+            if (e instanceof SocketException && m_config.getServerSocket().isClosed() && !shouldRun()) {
+                warn(null, "Client connection request for " + getName() + " on port " + m_config.getPort()
+                    + " failed as socket was closed during importer shutdown");
+            } else {
+                warn(e, "Unexpected error accepting client connections for " + getName() + " on port " + m_config.getPort());
+            }
         }
     }
 
@@ -114,6 +120,9 @@ public class ServerSocketImporter extends AbstractImporter {
                 Object params[] = null;
                 while (shouldRun()) {
                     String line = in.readLine();
+                    if (line == null) {
+                        break; // end of stream
+                    }
                     try{
                         params = formatter.transform(ByteBuffer.wrap(line.getBytes()));
                         //You should convert your data to params here.

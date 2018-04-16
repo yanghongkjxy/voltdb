@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -38,13 +38,14 @@ public:
     int64_t applyTxn(ReferenceSerializeInputLE *taskInfo,
                      boost::unordered_map<int64_t, PersistentTable*> &tables,
                      Pool *pool, VoltDBEngine *engine, int32_t remoteClusterId,
-                     const char *txnStart);
+                     const char *txnStart,
+                     int64_t localUniqueId);
 
 private:
     int64_t apply(ReferenceSerializeInputLE *taskInfo, const DRRecordType type,
                   boost::unordered_map<int64_t, PersistentTable*> &tables,
                   Pool *pool, VoltDBEngine *engine, int32_t remoteClusterId,
-                  const char *txnStart, int64_t sequenceNumber, int64_t uniqueId, bool skipRow);
+                  const char *txnStart, int64_t sequenceNumber, int64_t uniqueId, bool skipRow, bool replicatedTableOperation);
 };
 
 

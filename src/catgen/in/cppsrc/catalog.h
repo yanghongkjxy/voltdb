@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -64,7 +64,6 @@ protected:
     std::vector<std::string> m_deletions;
 
     void executeOne(const std::string &stmt);
-    CatalogType * itemForRef(const std::string &ref);
     CatalogType * itemForPath(const CatalogType *parent, const std::string &path);
     CatalogType * itemForPathPart(const CatalogType *parent, const std::string &pathPart) const;
 
@@ -83,6 +82,7 @@ private:
 
 public:
     void purgeDeletions();
+    CatalogType * itemForRef(const std::string &ref);
 
     /**
      * Create a new Catalog hierarchy.

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -26,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.messaging.HostMessenger;
@@ -35,6 +36,7 @@ import org.voltcore.utils.CoreUtils;
 import org.voltdb.AuthSystem.AuthUser;
 import org.voltdb.VoltProcedure.VoltAbortException;
 import org.voltdb.client.ClientResponse;
+import org.voltdb.client.ClientResponseWithPartitionKey;
 import org.voltdb.client.ProcedureCallback;
 import org.voltdb.exceptions.SerializableException;
 import org.voltdb.messaging.InitiateResponseMessage;
@@ -168,19 +170,11 @@ public class ProcedureRunnerNT {
             return;
         }
 
-        final Map<Integer,ClientResponse> allHostResponses = m_allHostResponses;
-
         m_allHostResponses.put(hostId, clientResponse);
         if (m_outstandingAllHostProcedureHostIds.size() == 0) {
             m_outstandingAllHostProc.set(false);
-            // the future needs to be completed in the right executor service
-            // so any follow on work will be in the right executor service
-            m_executorService.submit(new Runnable() {
-                @Override
-                public void run() {
-                    m_allHostFut.complete(allHostResponses);
-                }
-            });
+
+            m_allHostFut.complete(m_allHostResponses);
         }
     }
 
@@ -191,6 +185,68 @@ public class ProcedureRunnerNT {
         NTNestedProcedureCallback cb = new NTNestedProcedureCallback();
         m_ntProcService.m_internalNTClientAdapter.callProcedure(m_user, isAdminConnection(), m_timeout, cb, procName, params);
         return cb.fut();
+    }
+
+    public CompletableFuture<ClientResponseWithPartitionKey[]> callAllPartitionProcedure(final String procedureName, final Object... params) {
+        final Object[] args = new Object[params.length + 1];
+        System.arraycopy(params, 0, args, 1, params.length);
+
+        // get the partition keys
+        VoltTable keys = TheHashinator.getPartitionKeys(VoltType.INTEGER);
+
+        @SuppressWarnings("unchecked")
+        final CompletableFuture<ClientResponse>[] futureList = (CompletableFuture<ClientResponse>[]) new CompletableFuture<?>[keys.getRowCount()];
+        final int[] keyList = new int[keys.getRowCount()];
+
+        // get a list of all keys and call the procedure for each
+        keys.resetRowPosition();
+        for (int i = 0; keys.advanceRow(); i++) {
+            keyList[i] = (int) keys.getLong(1);
+            args[0] = keyList[i];
+            futureList[i] = callProcedure(procedureName, args);
+        }
+
+        // create the block to handle the procedure responses
+        Function<Void, ClientResponseWithPartitionKey[]> processResponses = v -> {
+            final ClientResponseWithPartitionKey[] crs = new ClientResponseWithPartitionKey[futureList.length];
+            for (int j = 0; j < futureList.length; ++j) {
+                ClientResponse cr2 = null;
+                try {
+                    cr2 = futureList[j].get();
+                } catch (InterruptedException | ExecutionException e) {
+                    cr2 = new ClientResponseImpl(ClientResponse.GRACEFUL_FAILURE, new VoltTable[0], e.toString());
+                }
+
+                crs[j] = new ClientResponseWithPartitionKey(keyList[j], cr2);
+            }
+            return crs;
+        };
+
+        // make a meta-future that waits on all individual responses
+        CompletableFuture<Void> gotAllResponsesCF = CompletableFuture.allOf(futureList);
+
+        // block until all responses have been received then call the block to process them
+        return gotAllResponsesCF.thenApply(processResponses).exceptionally(t -> {
+            // exception handling code should be called very rarely
+
+            // this checks for really bad things and tries not to swallow them
+            // it's probably overkill here because we're not directly calling user code
+            if (CoreUtils.isStoredProcThrowableFatalToServer(t)) {
+                throw (Error) t;
+            }
+
+            // get an appropriate error response
+            ClientResponse cr = ProcedureRunner.getErrorResponse(m_procedureName,
+                                                                true,
+                                                                0,
+                                                                m_appStatusCode,
+                                                                m_appStatusString,
+                                                                null,
+                                                                t);
+            // wrap this with the right type for the response
+            ClientResponseWithPartitionKey crwpk = new ClientResponseWithPartitionKey(0, cr);
+            return new ClientResponseWithPartitionKey[] { crwpk };
+        });
     }
 
     /**
@@ -285,6 +341,8 @@ public class ProcedureRunnerNT {
                                       (response.getStatus() != ClientResponse.USER_ABORT) &&
                                       (response.getStatus() != ClientResponse.SUCCESS),
                                       m_perCallStats);
+        // allow the GC to collect per-call stats if this proc isn't called for a while
+        m_perCallStats = null;
 
         // send the response to caller
         // must be done as IRM to CI mailbox for backpressure accounting
@@ -314,6 +372,8 @@ public class ProcedureRunnerNT {
                                       (response.getStatus() != ClientResponse.USER_ABORT) &&
                                       (response.getStatus() != ClientResponse.SUCCESS),
                                       m_perCallStats);
+        // allow the GC to collect per-call stats if this proc isn't called for a while
+        m_perCallStats = null;
 
         // send the response to the caller
         // must be done as IRM to CI mailbox for backpressure accounting
@@ -478,7 +538,7 @@ public class ProcedureRunnerNT {
     }
 
     /**
-     * For all-host NT procs, use site failures to call callbacks for hosts
+     * For all-host NT procedures, use site failures to call callbacks for hosts
      * that will obviously never respond.
      *
      * ICH and the other plumbing should handle regular, txn procs.
@@ -491,7 +551,7 @@ public class ProcedureRunnerNT {
                         ClientResponseImpl cri = new ClientResponseImpl(
                                 ClientResponse.CONNECTION_LOST,
                                 new VoltTable[0],
-                                "");
+                                "Host " + i + " failed, connection lost");
                         // embed the hostid as a string in app status string
                         // because the recipient expects this hack
                         cri.setAppStatusString(String.valueOf(i));
@@ -541,5 +601,13 @@ public class ProcedureRunnerNT {
 
     protected void noteRestoreCompleted() {
         m_ntProcService.isRestoring = false;
+    }
+
+    public String getConnectionIPAndPort() {
+        return m_ccxn.getHostnameAndIPAndPort();
+    }
+
+    public boolean isUserAuthEnabled() {
+        return m_user.isAuthEnabled();
     }
 }

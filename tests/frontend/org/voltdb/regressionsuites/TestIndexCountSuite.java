@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -25,8 +25,6 @@ package org.voltdb.regressionsuites;
 
 import java.io.IOException;
 
-import junit.framework.Test;
-
 import org.voltdb.BackendTarget;
 import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
@@ -35,11 +33,10 @@ import org.voltdb.client.NoConnectionsException;
 import org.voltdb.client.ProcCallException;
 import org.voltdb.compiler.VoltProjectBuilder;
 import org.voltdb_testprocs.regressionsuites.sqlfeatureprocs.BatchedMultiPartitionTest;
-public class TestIndexCountSuite extends RegressionSuite {
 
-    // procedures used by these tests
-    static final Class<?>[] PROCEDURES = {
-    };
+import junit.framework.Test;
+
+public class TestIndexCountSuite extends RegressionSuite {
 
     /**
      * Constructor needed for JUnit. Should just pass on parameters to superclass.
@@ -455,6 +452,26 @@ public class TestIndexCountSuite extends RegressionSuite {
         callAdHocFilterWithExpectedCount(client,"TU5", "ID = 2 AND POINTS > 0.5", 0);
     }
 
+    public void testENG12642() throws Exception {
+        // HSQLDB fails for this test.  But I don't think
+        // we really care here.
+        if (isHSQL()) {
+            return;
+        }
+        Client client = getClient();
+        String SQL = "SELECT COUNT(*) FROM ENG12642 WHERE PID = '385798C8E696478907' AND UID = '385798C8E696478907'";
+        validateTableOfLongs(client, SQL, new long[][] { { 0L } });
+    }
+
+    public void testENG12992() throws Exception {
+        Client client = getClient();
+        client.callProcedure("TU2.insert", 1, 1, "xin");
+        String SQL = "SELECT COUNT(*) FROM TU2 WHERE ID = 1 AND UNAME <= REPEAT('zzzz', 3);";
+        validateTableOfLongs(client, SQL, new long[][] { { 1L } });
+        SQL = "SELECT COUNT(*) FROM TU2 WHERE ID = 1 AND UNAME <= REPEAT('aaaa', 3);";
+        validateTableOfLongs(client, SQL, new long[][] { { 0L } });
+        client.callProcedure("@AdHoc", "DELETE FROM TU2;");
+    }
     /**
      * Build a list of the tests that will be run when TestTPCCSuite gets run by JUnit.
      * Use helper classes that are part of the RegressionSuite framework.
@@ -472,7 +489,6 @@ public class TestIndexCountSuite extends RegressionSuite {
         // build up a project builder for the workload
         VoltProjectBuilder project = new VoltProjectBuilder();
         project.addSchema(BatchedMultiPartitionTest.class.getResource("sqlindex-ddl.sql"));
-        project.addProcedures(PROCEDURES);
 
         project.addStmtProcedure("TU1_LT",       "SELECT COUNT(*) FROM TU1 WHERE POINTS < ?");
         project.addStmtProcedure("TU1_LET",       "SELECT COUNT(*) FROM TU1 WHERE POINTS <= ?");

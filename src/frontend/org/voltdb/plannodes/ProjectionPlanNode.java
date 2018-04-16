@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -27,6 +27,7 @@ import org.voltdb.expressions.AbstractExpression;
 import org.voltdb.expressions.AbstractSubqueryExpression;
 import org.voltdb.expressions.ExpressionUtil;
 import org.voltdb.expressions.TupleValueExpression;
+import org.voltdb.planner.PlanningErrorException;
 import org.voltdb.types.PlanNodeType;
 
 public class ProjectionPlanNode extends AbstractPlanNode {
@@ -49,8 +50,8 @@ public class ProjectionPlanNode extends AbstractPlanNode {
         super.validate();
 
         // Validate Expression Trees
-        for (int ctr = 0; ctr < m_outputSchema.getColumns().size(); ctr++) {
-            SchemaColumn column = m_outputSchema.getColumns().get(ctr);
+        for (int ctr = 0; ctr < m_outputSchema.size(); ctr++) {
+            SchemaColumn column = m_outputSchema.getColumn(ctr);
             AbstractExpression exp = column.getExpression();
             if (exp == null) {
                 throw new Exception("ERROR: The Output Column Expression at position '" + ctr + "' is NULL");
@@ -84,7 +85,7 @@ public class ProjectionPlanNode extends AbstractPlanNode {
         // to generate out of the aggregate node
         NodeSchema new_schema = new NodeSchema();
         int colIndex = 0;
-        for (SchemaColumn col : m_outputSchema.getColumns()) {
+        for (SchemaColumn col : m_outputSchema) {
             if (col.getExpression().getExpressionType().isAggregateExpression()) {
                 Object agg_col = input_schema.find(col.getTableName(),
                        col.getTableAlias(),
@@ -134,7 +135,7 @@ public class ProjectionPlanNode extends AbstractPlanNode {
     void resolveColumnIndexesUsingSchema(NodeSchema inputSchema) {
         // get all the TVEs in the output columns
         int difftor = 0;
-        for (SchemaColumn col : m_outputSchema.getColumns()) {
+        for (SchemaColumn col : m_outputSchema) {
             col.setDifferentiator(difftor);
             ++difftor;
             Collection<TupleValueExpression> allTves =
@@ -168,5 +169,72 @@ public class ProjectionPlanNode extends AbstractPlanNode {
      */
     public boolean planNodeClassNeedsProjectionNode() {
         return false;
+    }
+
+    /**
+     * Return true if this node unneeded if its
+     * input schema is the given one.
+     *
+     * @param child The Input Schema.
+     * @return true iff the node is unnecessary.
+     */
+    public boolean isIdentity(AbstractPlanNode childNode) throws PlanningErrorException {
+        assert(childNode != null);
+        // Find the output schema.
+        // If the child node has an inline projection node,
+        // then the output schema is the inline projection
+        // node's output schema.  Otherwise it's the output
+        // schema of the childNode itself.
+        NodeSchema childSchema = childNode.getTrueOutputSchema(false);
+        assert(childSchema != null);
+        NodeSchema outputSchema = getOutputSchema();
+        if (outputSchema.size() != childSchema.size()) {
+            return false;
+        }
+        for (int idx = 0; idx < outputSchema.size(); idx += 1) {
+            SchemaColumn col = outputSchema.getColumn(idx);
+            SchemaColumn childCol = childSchema.getColumn(idx);
+            if (col.getValueType() != childCol.getValueType()) {
+                return false;
+            }
+            if ( ! (col.getExpression() instanceof TupleValueExpression)) {
+                return false;
+            }
+            if ( ! (childCol.getExpression() instanceof TupleValueExpression)) {
+                return false;
+            }
+            TupleValueExpression tve = (TupleValueExpression)col.getExpression();
+            if (tve.getColumnIndex() != idx) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Replace the column names output schema of the child node with the
+     * output schema column names of this node.  We use this when we
+     * delete an unnecessary projection node.  We only need
+     * to make sure the column names are changed, since we
+     * will have checked carefully that everything else is the
+     * same.
+     *
+     * @param child
+     */
+    public void replaceChildOutputSchemaNames(AbstractPlanNode child) {
+        NodeSchema childSchema = child.getTrueOutputSchema(false);
+        NodeSchema mySchema = getOutputSchema();
+        assert(childSchema.size() == mySchema.size());
+        for (int idx = 0; idx < childSchema.size(); idx += 1) {
+            SchemaColumn cCol = childSchema.getColumn(idx);
+            SchemaColumn myCol = mySchema.getColumn(idx);
+            assert(cCol.getValueType() == myCol.getValueType());
+            assert(cCol.getExpression() instanceof TupleValueExpression);
+            assert(myCol.getExpression() instanceof TupleValueExpression);
+            cCol.reset(myCol.getTableName(),
+                       myCol.getTableAlias(),
+                       myCol.getColumnName(),
+                       myCol.getColumnAlias());
+        }
     }
 }

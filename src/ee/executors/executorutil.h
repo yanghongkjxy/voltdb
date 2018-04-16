@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -48,7 +48,7 @@
 
 #include "common/tabletuple.h"
 #include "expressions/abstractexpression.h"
-#include "storage/temptable.h"
+#include "storage/AbstractTempTable.hpp"
 
 #include <cstddef> // for NULL !
 #include <cassert>
@@ -66,7 +66,7 @@ struct CountingPostfilter {
     CountingPostfilter();
 
     // Constructor to initialize a CountingPostfilter
-    CountingPostfilter(const TempTable* table, const AbstractExpression * postPredicate, int limit, int offset,
+    CountingPostfilter(const AbstractTempTable* table, const AbstractExpression * postPredicate, int limit, int offset,
         CountingPostfilter* parentPostfilter = NULL);
 
     // Returns true is LIMIT is not reached yet
@@ -85,7 +85,7 @@ struct CountingPostfilter {
         m_under_limit = false;
     }
 
-    const TempTable *m_table;
+    const AbstractTempTable *m_table;
     const AbstractExpression *m_postPredicate;
     CountingPostfilter* m_parentPostfilter;
 

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -27,6 +27,7 @@
 #include "catalog/materializedviewinfo.h"
 
 #include "common/CatalogUtil.h"
+#include "common/ExecuteWithMpMemory.h"
 #include "common/types.h"
 #include "common/TupleSchemaBuilder.h"
 #include "common/ValueFactory.hpp"
@@ -43,7 +44,7 @@
 #include "storage/persistenttable.h"
 #include "storage/table.h"
 #include "storage/tablefactory.h"
-
+#include "execution/VoltDBEngine.h"
 #include "sha1/sha1.h"
 
 #include <boost/algorithm/string.hpp>
@@ -263,7 +264,8 @@ TableCatalogDelegate::getIndexIdString(const TableIndexScheme& indexScheme) {
 Table* TableCatalogDelegate::constructTableFromCatalog(catalog::Database const& catalogDatabase,
                                                        catalog::Table const& catalogTable,
                                                        bool isXDCR,
-                                                       int tableAllocationTargetSize) {
+                                                       int tableAllocationTargetSize,
+                                                       bool forceNoDR) {
     // Create a persistent table for this table in our catalog
     int32_t tableId = catalogTable.relativeIndex();
 
@@ -369,7 +371,8 @@ Table* TableCatalogDelegate::constructTableFromCatalog(catalog::Database const& 
 
     bool exportEnabled = isExportEnabledForTable(catalogDatabase, tableId);
     bool tableIsExportOnly = isTableExportOnly(catalogDatabase, tableId);
-    bool drEnabled = catalogTable.isDRed();
+    bool drEnabled = !forceNoDR && catalogTable.isDRed();
+    bool isReplicated = catalogTable.isreplicated();
     m_materialized = isTableMaterialized(catalogTable);
     std::string const& tableName = catalogTable.name();
     int32_t databaseId = catalogDatabase.relativeIndex();
@@ -387,6 +390,7 @@ Table* TableCatalogDelegate::constructTableFromCatalog(catalog::Database const& 
         tableAllocationTargetSize = 1024 * 64;
       }
     }
+    VOLT_DEBUG("Creating %s %s as %s", m_materialized?"VIEW":"TABLE", tableName.c_str(), isReplicated?"REPLICATED":"PARTITIONED");
     Table* table = TableFactory::getPersistentTable(databaseId, tableName,
                                                     schema, columnNames, m_signatureHash,
                                                     m_materialized,
@@ -395,7 +399,8 @@ Table* TableCatalogDelegate::constructTableFromCatalog(catalog::Database const& 
                                                     tableAllocationTargetSize,
                                                     catalogTable.tuplelimit(),
                                                     m_compactionThreshold,
-                                                    drEnabled);
+                                                    drEnabled,
+                                                    isReplicated);
     PersistentTable* persistentTable = dynamic_cast<PersistentTable*>(table);
     if ( ! persistentTable) {
         assert(pkeyIndexId.empty());
@@ -446,7 +451,9 @@ PersistentTable* TableCatalogDelegate::createDeltaTable(catalog::Database const&
     // Delta table will only have one row (currently).
     // Set the table block size to 64KB to achieve better space efficiency.
     // FYI: maximum column count = 1024, largest fixed length data type is short varchars (64 bytes)
-    Table* deltaTable = constructTableFromCatalog(catalogDatabase, catalogTable, false, 1024 * 64);
+    // Delta table must be forced to have DR disabled even if the source table is DRed,
+    // therefore true is passed in for the forceNoDR parameter
+    Table* deltaTable = constructTableFromCatalog(catalogDatabase, catalogTable, false, 1024 * 64, true);
     deltaTable->incrementRefcount();
     // We have the restriction that view on joined table cannot have non-persistent table source.
     // So here we could use static_cast. But if we in the future want to lift this limitation,
@@ -538,7 +545,7 @@ static void migrateChangedTuples(catalog::Table const& catalogTable,
     size_t blocksLeft = existingTable->allocatedBlockCount();
     while (blocksLeft) {
 
-        TableIterator& iterator = existingTable->iterator();
+        TableIterator iterator(existingTable->iterator());
         TableTuple& tupleToInsert = newTable->tempTuple();
 
         while (iterator.next(scannedTuple)) {
@@ -550,7 +557,7 @@ static void migrateChangedTuples(catalog::Table const& catalogTable,
                 if (columnSourceMap[i] >= 0) {
                     NValue value = scannedTuple.getNValue(columnSourceMap[i]);
                     if (columnExploded[i]) {
-                        value.allocateObjectFromInlinedValue(NULL);
+                        value.allocateObjectFromPool();
                     }
                     tupleToInsert.setNValue(i, value);
                 }
@@ -721,7 +728,17 @@ TableCatalogDelegate::processSchemaChanges(catalog::Database const& catalogDatab
     ///////////////////////////////////////////////
     // Drop the old table
     ///////////////////////////////////////////////
-    existingTable->decrementRefcount();
+    if (existingPersistentTable && newPersistentTable &&
+            newPersistentTable->isCatalogTableReplicated() != existingPersistentTable->isCatalogTableReplicated()) {
+        // A table can only be modified from replicated to partitioned
+        assert(newPersistentTable->isCatalogTableReplicated());
+        // Assume the MP memory context before starting the deallocate
+        ExecuteWithMpMemory useMpMemory;
+        existingTable->decrementRefcount();
+    }
+    else {
+        existingTable->decrementRefcount();
+    }
 
     ///////////////////////////////////////////////
     // Patch up the new table as a replacement

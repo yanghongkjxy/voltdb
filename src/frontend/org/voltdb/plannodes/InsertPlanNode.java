@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -42,12 +42,13 @@ public class InsertPlanNode extends AbstractOperationPlanNode {
         return m_isUpsert;
     }
 
-    public void setUpsert(boolean isUpsert) {
-        this.m_isUpsert = isUpsert;
-    }
-
     public InsertPlanNode() {
         super();
+    }
+
+    public InsertPlanNode(boolean isUpsert) {
+        this();
+        m_isUpsert = isUpsert;
     }
 
     public boolean getMultiPartition() {

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -17,32 +17,24 @@
 
 #include <iostream>
 #include "tablecountexecutor.h"
-#include "common/debuglog.h"
-#include "common/common.h"
-#include "common/tabletuple.h"
-#include "common/FatalException.hpp"
-#include "common/ValueFactory.hpp"
-#include "expressions/abstractexpression.h"
 #include "plannodes/tablecountnode.h"
 #include "storage/persistenttable.h"
-#include "storage/temptable.h"
 #include "storage/tablefactory.h"
-#include "storage/tableiterator.h"
 
 using namespace voltdb;
 
 bool TableCountExecutor::p_init(AbstractPlanNode* abstract_node,
-                             TempTableLimits* limits)
+                                const ExecutorVector& executorVector)
 {
     VOLT_TRACE("init Table Count Executor");
 
     assert(dynamic_cast<TableCountPlanNode*>(abstract_node));
-    assert(dynamic_cast<TableCountPlanNode*>(abstract_node)->isSubQuery() ||
+    assert(dynamic_cast<TableCountPlanNode*>(abstract_node)->isSubqueryScan() ||
            dynamic_cast<TableCountPlanNode*>(abstract_node)->getTargetTable());
     assert(abstract_node->getOutputSchema().size() == 1);
 
     // Create output table based on output schema from the plan
-    setTempOutputTable(limits);
+    setTempOutputTable(executorVector);
 
     return true;
 }
@@ -57,10 +49,10 @@ bool TableCountExecutor::p_execute(const NValueArray &params) {
     assert ((int)output_table->columnCount() == 1);
 
     int64_t rowCounts = 0;
-    if (node->isSubQuery()) {
+    if (node->isSubqueryScan()) {
         Table* input_table = node->getChildren()[0]->getOutputTable();
         assert(input_table);
-        TempTable* temp_table = dynamic_cast<TempTable*>(input_table);
+        AbstractTempTable* temp_table = dynamic_cast<AbstractTempTable*>(input_table);
         if ( ! temp_table) {
             throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
                     "May not iterate a streamed table.");
@@ -89,4 +81,3 @@ bool TableCountExecutor::p_execute(const NValueArray &params) {
 
 TableCountExecutor::~TableCountExecutor() {
 }
-

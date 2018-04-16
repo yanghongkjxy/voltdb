@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -109,7 +109,7 @@ class MiniNode extends Thread implements DisconnectFailedHostsCallback
     private final Queue<Message> m_recvQ = new ConcurrentLinkedQueue<Message>();
     AtomicBoolean m_shouldContinue = new AtomicBoolean(true);
 
-    MiniNode(long HSId, Set<Long> HSIds, FakeMesh mesh)
+    MiniNode(long HSId, Set<Long> HSIds, FakeMesh mesh, long seed)
     {
         m_nodeLog = new VoltLogger("MININODE-" + CoreUtils.hsIdToString(HSId));
         m_nodeLog.info("Constructing MiniNode for HSID: " + CoreUtils.hsIdToString(HSId));
@@ -119,7 +119,7 @@ class MiniNode extends Thread implements DisconnectFailedHostsCallback
         m_deadTracker = new DeadHostTracker(TIMEOUT);
         mesh.registerNode(m_HSId, m_sendQ, m_recvQ);
         m_mailbox = new MiniMailbox(m_HSId, m_sendQ);
-        m_miniSite = new MiniSite(m_mailbox, HSIds, this, m_nodeLog);
+        m_miniSite = new MiniSite(m_mailbox, HSIds, this, m_nodeLog, seed);
     }
 
     synchronized void stopTracking(long HSId) {

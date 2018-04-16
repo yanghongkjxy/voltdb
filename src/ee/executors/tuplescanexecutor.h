@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -61,7 +61,7 @@ namespace voltdb
         {}
     protected:
         bool p_init(AbstractPlanNode* abstract_node,
-                    TempTableLimits* limits);
+                    const ExecutorVector& executorVector);
         bool p_execute(const NValueArray& params);
 
     };

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -73,6 +73,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import javax.net.ssl.SSLContext;
 
+import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpVersion;
@@ -86,6 +87,7 @@ import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.config.Registry;
 import org.apache.http.config.RegistryBuilder;
+import org.apache.http.conn.HttpHostConnectException;
 import org.apache.http.conn.socket.ConnectionSocketFactory;
 import org.apache.http.conn.socket.PlainConnectionSocketFactory;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
@@ -123,6 +125,7 @@ import org.voltdb.compiler.deploymentfile.UsersType;
 import org.voltdb.compiler.procedures.CrazyBlahProc;
 import org.voltdb.compiler.procedures.DelayProc;
 import org.voltdb.compiler.procedures.SelectStarHelloWorld;
+import org.voltdb.regressionsuites.LocalCluster;
 import org.voltdb.types.TimestampType;
 import org.voltdb.utils.Base64;
 import org.voltdb.utils.Encoder;
@@ -136,6 +139,9 @@ public class TestJSONInterface extends TestCase {
     private static final String VALID_JSONP = "good_$123";
     private static final String INVALID_JSONP;
     private static final Set<Integer> HANDLED_CLIENT_ERRORS = new HashSet<>();
+
+    private static final ProcedurePartitionData fooData = new ProcedurePartitionData("foo", "bar");
+    private static final ProcedurePartitionData blahData = new ProcedurePartitionData("blah", "ival");
 
     static {
         String pval = "jQuery111106314619798213243_1487039392105\"'></XSS/*-*/STYLE=xss:e/**/xpression(try{a=firstTime}catch(e){firstTime=1;alert(9096)})>";
@@ -280,6 +286,15 @@ public class TestJSONInterface extends TestCase {
                         assertTrue(ct.contains(expectedCt));
                     }
                     assertEquals(expectedCode, status);
+                    if (status == 200) {
+                        //If we got a good response we should have a cookie. Some good responses dont have cookie so check header present.
+                        Header hs[] = response.getHeaders("Set-Cookie");
+                        if (hs != null && hs.length > 0) {
+                            String cookie = hs[0].getValue();
+                            assertTrue(cookie.contains("vmc"));
+                            assertTrue(cookie.contains("HttpOnly"));
+                        }
+                    }
                     if ((status >= 200 && status < 300) || HANDLED_CLIENT_ERRORS.contains(status)) {
                         HttpEntity entity = response.getEntity();
                         return entity != null ? EntityUtils.toString(entity) : null;
@@ -361,6 +376,16 @@ public class TestJSONInterface extends TestCase {
             callProcOverJSONRaw(params, httpPort, expectedCode);
         }
         return ret;
+    }
+
+    public static boolean canAccessHttpPort(int port) throws Exception {
+        String url = "http://127.0.0.1:" + port + "/deployment";
+        try {
+            getUrlOverJSON(url, null, null, null, 200,  "application/json");
+            return true;
+        } catch (HttpHostConnectException e) {
+            return false;
+        }
     }
 
     public static Response responseFromJSON(String jsonStr) throws JSONException, IOException {
@@ -504,7 +529,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -693,7 +718,7 @@ public class TestJSONInterface extends TestCase {
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("blah", "ival");
             builder.addStmtProcedure("Insert", "insert into blah values (?,?,?,?,?);");
-            builder.addProcedures(CrazyBlahProc.class);
+            builder.addProcedure(CrazyBlahProc.class, blahData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"), 1, 1, 0, 0) != null;
             assertTrue(success);
@@ -795,7 +820,7 @@ public class TestJSONInterface extends TestCase {
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("blah", "ival");
             builder.addStmtProcedure("Insert", "insert into blah values (?,?,?,?,?);");
-            builder.addProcedures(CrazyBlahProc.class);
+            builder.addProcedure(CrazyBlahProc.class, blahData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"), 1, 1, 0, 0) != null;
             assertTrue(success);
@@ -965,7 +990,7 @@ public class TestJSONInterface extends TestCase {
             // Call @AdHoc with many parameters (more than 2)
             pset = ParameterSet.fromArrayNoCopy("select * from blah", "foo", "bar");
             responseJSON = callProcOverJSON("@AdHoc", pset, null, null, false);
-            System.err.println(responseJSON);
+            System.out.println(responseJSON);
             assertTrue(responseJSON.contains("Too many actual arguments were passed for the parameters in the sql "
                     + "statement(s): (2 vs. 0)"));
 
@@ -975,6 +1000,52 @@ public class TestJSONInterface extends TestCase {
                 server.join();
             }
             server = null;
+        }
+    }
+
+    public void testHTTPListenerAfterRejoin() throws Exception {
+        if (!VoltDB.instance().getConfig().m_isEnterprise) {
+            // Community version does not support rejoin.
+            return;
+        }
+        final long TIMEOUT_THRESHOLD = 60000; // One minute
+        VoltProjectBuilder builder = new VoltProjectBuilder();
+        builder.setSecurityEnabled(false, false);
+        builder.setJSONAPIEnabled(true);
+
+        LocalCluster cluster = new LocalCluster("rejoin.jar", 2, 3, 1, BackendTarget.NATIVE_EE_JNI, true);
+        try {
+            boolean success = cluster.compile(builder);
+            assertTrue(success);
+            cluster.setHttpPortEnabled(true);
+            cluster.startUp();
+
+            long startTime = System.currentTimeMillis();
+            int port0 = cluster.httpPort(0), port1 = cluster.httpPort(1), port2 = cluster.httpPort(2);
+            while ( !canAccessHttpPort(port0)|| !canAccessHttpPort(port1) || !canAccessHttpPort(port2)) {
+                if (System.currentTimeMillis() - startTime >= TIMEOUT_THRESHOLD) {
+                    fail("Local cluster failed to start up");
+                }
+                Thread.sleep(200);
+            }
+            assertTrue("Http port failed to open when the node is on", canAccessHttpPort(port0));
+
+            cluster.killSingleHost(0);
+            assertFalse("Http port failed to close when the node is offline", canAccessHttpPort(port0));
+
+            cluster.recoverOne(0, 0, "", true);
+            startTime = System.currentTimeMillis();
+            port0 = cluster.httpPort(3);
+            while ( !canAccessHttpPort(port0)|| !canAccessHttpPort(port1) || !canAccessHttpPort(port2)) {
+                if (System.currentTimeMillis() - startTime >= TIMEOUT_THRESHOLD) {
+                    fail("Local cluster failed to rejoin");
+                }
+                Thread.sleep(200);
+            }
+            assertTrue("Http port failed to open when the node is rejoined", canAccessHttpPort(port0));
+            Thread.sleep(1000);
+        } finally {
+            try {cluster.shutDown();} catch (Exception e) {}
         }
     }
 
@@ -997,7 +1068,7 @@ public class TestJSONInterface extends TestCase {
             builder.addPartitionInfo("HELLOWORLD", "DIALECT");
             builder.addStmtProcedure("Insert", "insert into HELLOWORLD values (?,?,?);");
             builder.addStmtProcedure("Select", "select * from HELLOWORLD;");
-            builder.addProcedures(SelectStarHelloWorld.class);
+            builder.addProcedure(SelectStarHelloWorld.class);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -1285,7 +1356,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addLiteralSchema(simpleSchema);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -1321,8 +1392,8 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addLiteralSchema(simpleSchema);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(InsertProc.class);
-            builder.addProcedures(LongReadProc.class);
+            builder.addProcedure(InsertProc.class);
+            builder.addProcedure(LongReadProc.class);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -1395,7 +1466,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addLiteralSchema(simpleSchema);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -1517,7 +1588,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -1555,7 +1626,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -1598,7 +1669,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -1712,7 +1783,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -1794,7 +1865,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             UserInfo users[] = new UserInfo[] {
                     new UserInfo("user1", "admin", new String[] {"user"}),
@@ -1870,7 +1941,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             UserInfo users[] = new UserInfo[] {
                     new UserInfo("user1", "admin", new String[] {"user"}),
@@ -1910,7 +1981,9 @@ public class TestJSONInterface extends TestCase {
             dep = getUrlOverJSON(protocolPrefix + "localhost:8095/deployment/download", "user2", "admin", "hashed", 200, "text/xml");
             assertTrue(dep.contains("<deployment>"));
             assertTrue(dep.contains("</deployment>"));
-
+            dep = getUrlOverJSON(protocolPrefix + "localhost:8095/catalog/", "user2", "admin", "hashed", 200, "text/html");
+            //Check if we have a catalog element
+            assertTrue(dep.contains("CREATE TABLE FOO"));
         } finally {
             if (server != null) {
                 server.shutdown();
@@ -1935,7 +2008,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             UserInfo users[] = new UserInfo[] {
                     new UserInfo("user1", "admin", new String[] {"user"}),
@@ -1992,7 +2065,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             builder.setUseDDLSchema(true);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
@@ -2103,7 +2176,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -2151,7 +2224,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("test1", "fld1");
-            builder.addProcedures(WorkerProc.class);
+            builder.addProcedure(WorkerProc.class);
             UserInfo[] ui = new UserInfo[5];
             if (securityOn) {
                 RoleInfo ri = new RoleInfo("role1", true, false, true, true, false, false);
@@ -2200,6 +2273,8 @@ public class TestJSONInterface extends TestCase {
         }
     }
 
+
+
     public void testInvalidURI() throws Exception {
         try {
             String simpleSchema
@@ -2215,7 +2290,7 @@ public class TestJSONInterface extends TestCase {
             VoltProjectBuilder builder = new VoltProjectBuilder();
             builder.addSchema(schemaPath);
             builder.addPartitionInfo("foo", "bar");
-            builder.addProcedures(DelayProc.class);
+            builder.addProcedure(DelayProc.class, fooData);
             builder.setHTTPDPort(8095);
             boolean success = builder.compile(Configuration.getPathToCatalogForTest("json.jar"));
             assertTrue(success);
@@ -2404,7 +2479,7 @@ public class TestJSONInterface extends TestCase {
                         params.put("admin", "true");
                         String responseJSON = postUrlOverJSON(protocolPrefix + "localhost:8095/deployment/", m_username, m_password, "hashed", 200, "application/json", params);
                         if (!responseJSON.contains("Deployment Updated.")) {
-                            System.out.println("Failed to update deployment");
+                            System.err.println("Failed to update deployment");
                             s_success = false;
                         }
                     }
@@ -2412,9 +2487,9 @@ public class TestJSONInterface extends TestCase {
                     // do a write and a read
                     ParameterSet pset = ParameterSet.fromArrayNoCopy("insert into test1 values (" + (m_id) + ")");
                     String responseJSON = callProcOverJSON("@AdHoc", pset, m_username, m_password, false, false);
-                    //System.out.println("Insert response: " + responseJSON);
+                    //System.err.println("Insert response: " + responseJSON);
                     if (!responseJSON.contains("\"data\":[[1]]")) {
-                        System.out.println("Insert should have returned 1. Got: " + responseJSON);
+                        System.err.println("Insert should have returned 1. Got: " + responseJSON);
                         s_success = false;
                         return;
                     }
@@ -2426,20 +2501,20 @@ public class TestJSONInterface extends TestCase {
                     int startIndex = responseJSON.indexOf(":[[");
                     int endIndex = responseJSON.indexOf("]]");
                     if (startIndex==-1 || endIndex==-1) {
-                        System.out.println("Invalid response from select: " + responseJSON);
+                        System.err.println("Invalid response from select: " + responseJSON);
                         s_success = false;
                         return;
                     }
                     int count = Integer.parseInt(responseJSON.substring(startIndex+3, endIndex));
                     if (count < expectedCount) {
-                        System.out.println("Select must have returned at least " + expectedCount + ". Got "+ count);
+                        System.err.println("Select must have returned at least " + expectedCount + ". Got "+ count);
                         s_success = false;
                         return;
                     }
                     // do a proc cal that takes longer
                     pset = ParameterSet.fromArrayNoCopy(500);
                     responseJSON = callProcOverJSON("TestJSONInterface$WorkerProc", pset, m_username, m_password, false, false);
-                    //System.out.println("WorkperProc response: " + responseJSON);
+                    //System.err.println("WorkperProc response: " + responseJSON);
                 }
             } catch(Exception e) {
                 e.printStackTrace();

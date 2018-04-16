@@ -403,3 +403,22 @@ CREATE TABLE ENG_12105 (
   VARBIN  VARBINARY(100),
   PRIMARY KEY (ID)
 );
+
+CREATE TABLE ENG_539 (
+  ID      INTEGER NOT NULL,
+  VARBIN  VARBINARY(3),
+  BIG     BIGINT,
+  PRIMARY KEY (ID)
+);
+
+create table swapper_table_foo (
+       i integer,
+       j varchar(32),
+       primary key (i)
+);
+
+create table swapper_table_bar (
+       i integer,
+       j varchar(32),
+       primary key (i)
+);

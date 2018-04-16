@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -187,7 +187,7 @@ final public class TestVoltDB {
         // valid rejoin config
         String[] args200 = {"rejoin", "host", "localhost"};
         config = new VoltDB.Configuration(args200);
-        assertEquals(config.validate(), MiscUtils.isPro());
+        assertTrue(config.validate());
 
         // invalid rejoin config, missing rejoin host
         String[] args250 = {"rejoin"};
@@ -197,12 +197,12 @@ final public class TestVoltDB {
         // rejoinhost should still work
         String[] args201 = {"rejoinhost", "localhost"};
         config = new VoltDB.Configuration(args201);
-        assertEquals(config.validate(), MiscUtils.isPro());
+        assertTrue(config.validate());
 
         // valid rejoin config
         String[] args300 = {"live", "rejoin", "host", "localhost"};
         config = new VoltDB.Configuration(args300);
-        assertEquals(MiscUtils.isPro(), config.validate());
+        assertTrue(config.validate());
         assertEquals(StartAction.LIVE_REJOIN, config.m_startAction);
     }
 

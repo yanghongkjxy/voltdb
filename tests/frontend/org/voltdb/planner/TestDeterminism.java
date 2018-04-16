@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -23,7 +23,15 @@
 
 package org.voltdb.planner;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.net.URL;
+import java.net.URLDecoder;
+
+import org.hsqldb_voltpatches.HSQLInterface;
 import org.voltdb.compiler.DeterminismMode;
+import org.voltdb.compiler.VoltCompiler;
+import org.voltdb.compiler.VoltCompiler.DdlProceduresToLoad;
 
 public class TestDeterminism extends PlannerTestCase {
     @Override
@@ -1074,6 +1082,32 @@ public class TestDeterminism extends PlannerTestCase {
         assertMPPlanDeterminismCore(sql, UNORDERED, CONSISTENT, false, DeterminismMode.FASTER);
     }
 
+    /*
+     * A test that runs some read-only non-deterministic DDLs, check that the output does not contain
+     * any ND warnings
+     */
+    public void testDeterminismReadOnlyNoWarning() throws Exception {
+        // Should the members be reused here?
+        HSQLInterface hsql = HSQLInterface.loadHsqldb(ParameterizationInfo.getParamStateManager());
+        VoltCompiler compiler = new VoltCompiler(false);
+        VoltCompiler.DdlProceduresToLoad all_procs = DdlProceduresToLoad.NO_DDL_PROCEDURES;
+
+        URL path = TestDeterminism.class.getResource("testplans-determinism-read-only.sql");
+        String pathStr = URLDecoder.decode(path.getPath(), "UTF-8");
+        compiler.loadSchema(hsql, all_procs, pathStr);
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        compiler.summarizeSuccess(new PrintStream(outputStream), null, "");
+        System.out.println(outputStream.toString());
+        // There is no warnings generated for read-only ND queries
+        String msg = outputStream.toString();
+        assertFalse(stringContains(msg, "ND"));
+        assertFalse(stringContains(msg, "WARN"));
+        assertTrue(stringContains(msg, "Successfully created"));
+        assertTrue(stringContains(msg, "Catalog contains"));
+        outputStream.close();
+    }
+
     private void assertMPPlanDeterminismCore(String sql, boolean order, boolean content, DeterminismMode detMode) {
         assertMPPlanDeterminismCore(sql, order, content, true, detMode);
         }
@@ -1168,4 +1202,11 @@ public class TestDeterminism extends PlannerTestCase {
         assertMPPlanDeterminismCombo(sql, ORDERED, CONSISTENT, tryOrderBy, null, DeterminismMode.SAFER);
     }
 
+    /*
+     * Helper function for sub-string regex matching
+     */
+    private boolean stringContains(String msg, String regex) {
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(regex);
+        return pattern.matcher(msg).find();
+    }
 }

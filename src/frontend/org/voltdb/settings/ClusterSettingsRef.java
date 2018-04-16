@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -54,6 +54,10 @@ public class ClusterSettingsRef extends AtomicStampedReference<ClusterSettings>
             bytes = zk.getData(VoltZK.cluster_settings, false, stat);
         } catch (KeeperException|InterruptedException e) {
             throw new SettingsException("Failed to initialize from ZooKeeper", e);
+        }
+
+        if (bytes==null) {
+            throw new SettingsException("Failed to initialize cluster settings from ZooKeeper");
         }
         set(ClusterSettings.create(bytes), stat.getVersion());
         return stat.getVersion();

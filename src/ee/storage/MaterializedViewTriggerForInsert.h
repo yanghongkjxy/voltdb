@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -45,7 +45,7 @@ class TableIndex;
 
 /**
  * Manage the inserts and updates for a materialized view table based on inserts to
- * a source table. An instance sits between the two tables translasting changes in one table
+ * a source table. An instance sits between the two tables translating changes in one table
  * into changes in another table. It loads all this information from the catalog in its
  * constructor.
  */
@@ -117,7 +117,7 @@ protected:
     std::size_t parseAggregation(catalog::MaterializedViewInfo *mvInfo);
 
     NValue getGroupByValueFromSrcTuple(int colIndex, const TableTuple& tuple);
-    NValue getAggInputFromSrcTuple(int aggIndex, const TableTuple& tuple);
+    NValue getAggInputFromSrcTuple(int aggIndex, int aggExprOffset, const TableTuple& tuple);
 
     /**
      * build a search key based on the src table value
@@ -177,6 +177,8 @@ protected:
     // How many optional agg columns in the materialized view table?
     // This MUST be declared/initialized AFTER m_aggExprs/m_aggColIndexes/m_aggTypes.
     std::size_t m_aggColumnCount;
+    // Store the index of last COUNT(*) for optimization
+    std::size_t m_countStarColumnIndex;
 
     // vector of target table indexes to update.
     // Ideally, these should be a subset of the target table indexes that

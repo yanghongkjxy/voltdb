@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -51,12 +51,10 @@
 namespace voltdb {
 
 TempTable::TempTable()
-  : Table(TABLE_BLOCKSIZE),
-    m_iter(this),
-    m_limits(NULL)
+    : AbstractTempTable(TABLE_BLOCKSIZE)
+    , m_data()
+    , m_limits(NULL)
 {
-    // this happens here because m_data might not be initialized above
-    m_iter.reset(m_data.begin());
 }
 
 TempTable::~TempTable() {}
@@ -74,7 +72,7 @@ void TempTable::deleteAllTempTupleDeepCopies() {
     }
     if (m_schema->getUninlinedObjectColumnCount() > 0) {
         TableTuple target(m_schema);
-        TableIterator iter(this, m_data.begin());
+        TableIterator iter(this, m_data.begin(), false);
         while (iter.hasNext()) {
             iter.next(target);
             target.freeObjectColumns();

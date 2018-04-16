@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -69,7 +69,7 @@ public class PullSocketImporterConfig implements ImporterConfig
     {
         String hosts = props.getProperty("addresses", "").trim();
         if (hosts.isEmpty()) {
-            throw new IllegalArgumentException("'adresses' is a required property and must be defined");
+            throw new IllegalArgumentException("'addresses' is a required property and must be defined");
         }
         String procedure = props.getProperty("procedure", "").trim();
         if (procedure.isEmpty()) {

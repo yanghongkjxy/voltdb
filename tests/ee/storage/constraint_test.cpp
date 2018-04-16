@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -79,11 +79,11 @@ public:
     ConstraintTest() : table(NULL) {
         this->database_id = 1000;
         m_exceptionBuffer = new char[4096];
-        m_engine.setBuffers(NULL, 0, NULL, 0, NULL, 0, NULL, 0, m_exceptionBuffer, 4096);
+        m_engine.setBuffers(NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, 0, m_exceptionBuffer, 4096);
         m_engine.resetReusedResultOutputBuffer();
-        int partitionCount = 1;
-        m_engine.initialize(0, 0, 0, 0, "", 0, 1024, DEFAULT_TEMP_TABLE_MEMORY, false);
-        m_engine.updateHashinator( HASHINATOR_LEGACY, (char*)&partitionCount, NULL, 0);
+        int partitionCount = htonl(1);
+        m_engine.initialize(0, 0, 0, partitionCount, 0, "", 0, 1024, DEFAULT_TEMP_TABLE_MEMORY, true);
+        m_engine.updateHashinator((char*)&partitionCount, NULL, 0);
     }
     ~ConstraintTest() {
         delete table;

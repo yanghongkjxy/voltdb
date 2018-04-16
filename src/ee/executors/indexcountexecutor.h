@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -32,7 +32,7 @@
 
 namespace voltdb {
 
-class TempTable;
+class AbstractTempTable;
 class PersistentTable;
 class AbstractExpression;
 class IndexCountPlanNode;
@@ -48,7 +48,7 @@ public:
     ~IndexCountExecutor();
 
 private:
-    bool p_init(AbstractPlanNode*, TempTableLimits* limits);
+    bool p_init(AbstractPlanNode*, const ExecutorVector& executorVector);
     bool p_execute(const NValueArray &params);
 
     // Data in this class is arranged roughly in the order it is read for
@@ -67,7 +67,7 @@ private:
     IndexLookupType m_endType;
 
     // IndexCount Information
-    TempTable* m_outputTable;
+    AbstractTempTable* m_outputTable;
 
 
     // arrange the memory mgmt aids at the bottom to try to maximize

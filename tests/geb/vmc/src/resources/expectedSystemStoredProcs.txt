@@ -3,6 +3,7 @@
 @Explain
 @ExplainProc
 @ExplainView
+@Ping
 @Pause
 @Quiesce
 @Resume
@@ -24,3 +25,4 @@
 @GetPartitionKeys
 @Trace
 @Trace
+@SwapTables

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -614,7 +614,7 @@ public class JDBC4DatabaseMetaData implements java.sql.DatabaseMetaData
     public String getNumericFunctions() throws SQLException
     {
         checkClosed();
-        return "ABS,BITAND,BITNOT,BITOR,BIT_SHIFT_LEFT,BIT_SHIFT_RIGHT,BITXOR,CEILING,COS,COT,CSC,EXP,FLOOR,LN,LOG,LOG10,PI,POWER,ROUND,SEC,SIN,SQRT,TAN";
+        return "ABS,BITAND,BITNOT,BITOR,BIT_SHIFT_LEFT,BIT_SHIFT_RIGHT,BITXOR,CEILING,COS,COT,CSC,DEGREES,EXP,FLOOR,LN,LOG,LOG10,PI,POWER,RADIANS,ROUND,SEC,SIN,SQRT,TAN";
     }
 
     // Retrieves a description of the given table's primary key columns.

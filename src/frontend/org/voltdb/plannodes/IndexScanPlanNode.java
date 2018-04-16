@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -41,6 +41,7 @@ import org.voltdb.expressions.ComparisonExpression;
 import org.voltdb.expressions.ExpressionUtil;
 import org.voltdb.expressions.OperatorExpression;
 import org.voltdb.expressions.TupleValueExpression;
+import org.voltdb.planner.ScanPlanNodeWhichCanHaveInlineInsert;
 import org.voltdb.planner.parseinfo.StmtTableScan;
 import org.voltdb.planner.parseinfo.StmtTargetTableScan;
 import org.voltdb.types.ExpressionType;
@@ -50,7 +51,7 @@ import org.voltdb.types.PlanNodeType;
 import org.voltdb.types.SortDirectionType;
 import org.voltdb.utils.CatalogUtil;
 
-public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSortablePlanNode {
+public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSortablePlanNode, ScanPlanNodeWhichCanHaveInlineInsert {
 
     public enum Members {
         TARGET_INDEX_NAME,
@@ -61,6 +62,7 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
         SKIP_NULL_PREDICATE,
         KEY_ITERATE,
         LOOKUP_TYPE,
+        HAS_OFFSET_RANK,
         PURPOSE,
         SORT_DIRECTION;
     }
@@ -85,7 +87,7 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
     protected final List<AbstractExpression> m_searchkeyExpressions = new ArrayList<>();
 
     // If the search key expression is actually a "not distinct" expression, we do not want the executor to skip null candidates.
-    protected final List<Boolean> m_compareNotDistinct = new ArrayList<Boolean>();
+    protected final List<Boolean> m_compareNotDistinct = new ArrayList<>();
 
     // for reverse scan LTE only.
     // The initial expression is needed to control a (short?) forward scan to adjust the start of a reverse
@@ -104,6 +106,9 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
 
     // The sorting direction
     protected SortDirectionType m_sortDirection = SortDirectionType.INVALID;
+
+    // offset rank index
+    protected boolean m_hasOffsetRankOptimization = false;
 
     // A reference to the Catalog index object which defined the index which
     // this index scan is going to use
@@ -363,8 +368,8 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
         }
         // Verify that all sort expressions are covered by the consecutive index expressions
         // starting from the first one
-        List<AbstractExpression> indexedExprs = new ArrayList<AbstractExpression>();
-        List<ColumnRef> indexedColRefs = new ArrayList<ColumnRef>();
+        List<AbstractExpression> indexedExprs = new ArrayList<>();
+        List<ColumnRef> indexedColRefs = new ArrayList<>();
         boolean columnIndex = CatalogUtil.getCatalogIndexExpressions(getCatalogIndex(), getTableScan(),
                 indexedExprs, indexedColRefs);
         int indexExprCount = (columnIndex) ? indexedColRefs.size() : indexedExprs.size();
@@ -530,6 +535,10 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
 
     public AbstractExpression getSkipNullPredicate() {
         return m_skip_null_predicate;
+    }
+
+    public void setOffsetRank(boolean offsetRank) {
+        m_hasOffsetRankOptimization = offsetRank;
     }
 
     public boolean isReverseScan() {
@@ -734,6 +743,9 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
         super.toJSONString(stringer);
         stringer.keySymbolValuePair(Members.LOOKUP_TYPE.name(), m_lookupType.toString());
         stringer.keySymbolValuePair(Members.SORT_DIRECTION.name(), m_sortDirection.toString());
+        if (m_hasOffsetRankOptimization) {
+            stringer.keySymbolValuePair(Members.HAS_OFFSET_RANK.name(), true);
+        }
         if (m_purpose != FOR_SCANNING_PERFORMANCE_OR_ORDERING) {
             stringer.keySymbolValuePair(Members.PURPOSE.name(), m_purpose);
         }
@@ -761,6 +773,9 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
         super.loadFromJSONObject(jobj, db);
         m_lookupType = IndexLookupType.get( jobj.getString( Members.LOOKUP_TYPE.name() ) );
         m_sortDirection = SortDirectionType.get( jobj.getString( Members.SORT_DIRECTION.name() ) );
+        if (jobj.has(Members.HAS_OFFSET_RANK.name())) {
+            m_hasOffsetRankOptimization = jobj.getBoolean(Members.HAS_OFFSET_RANK.name());
+        }
         m_purpose = jobj.has(Members.PURPOSE.name()) ?
                 jobj.getInt(Members.PURPOSE.name()) : FOR_SCANNING_PERFORMANCE_OR_ORDERING;
         m_targetIndexName = jobj.getString(Members.TARGET_INDEX_NAME.name());
@@ -800,6 +815,9 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
             }
             else if (m_purpose == FOR_GROUPING) {
                 usageInfo = " (for optimized grouping only)";
+            }
+            else if (m_hasOffsetRankOptimization) {
+                usageInfo = " (for offset rank lookup and for sort order)";
             }
             else {
                 usageInfo = " (for sort order only)";
@@ -1043,6 +1061,16 @@ public class IndexScanPlanNode extends AbstractScanPlanNode implements IndexSort
     @Override
     public AbstractPlanNode planNode() {
         // TODO Auto-generated method stub
+        return this;
+    }
+
+    @Override
+    public boolean hasInlineAggregateNode() {
+        return AggregatePlanNode.getInlineAggregationNode(this) != null;
+    }
+
+    @Override
+    public AbstractPlanNode getAbstractNode() {
         return this;
     }
 

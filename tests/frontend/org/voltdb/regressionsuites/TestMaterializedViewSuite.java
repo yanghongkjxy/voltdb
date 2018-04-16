@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -67,14 +67,6 @@ public class TestMaterializedViewSuite extends RegressionSuite {
     private static final int[] yesAndNo = new int[]{1, 0};
     private static final int[] never = new int[]{0};
 
-    // procedures used by these tests
-    static final Class<?>[] PROCEDURES = {
-        AddPerson.class, DeletePerson.class, UpdatePerson.class, AggAges.class,
-        SelectAllPeople.class, AggThings.class, AddThing.class, OverflowTest.class,
-        Eng798Insert.class, TruncateMatViewDataMP.class,
-        TruncateTables.class, TruncatePeople.class
-    };
-
     // For comparing tables with FLOAT columns
     private static final double EPSILON = 0.000001;
 
@@ -83,7 +75,6 @@ public class TestMaterializedViewSuite extends RegressionSuite {
     }
 
     private void truncateBeforeTest(Client client) {
-        // TODO Auto-generated method stub
         VoltTable[] results = null;
         try {
             results = client.callProcedure("TruncateMatViewDataMP").getResults();
@@ -214,6 +205,14 @@ public class TestMaterializedViewSuite extends RegressionSuite {
         tresult = client.callProcedure("@AdHoc", "SELECT d1, d2, COUNT(*), MIN(abs(v1)) AS vmin, MAX(abs(v1)) AS vmax FROM ENG6511 GROUP BY d1, d2 ORDER BY 1, 2;").getResults()[0];
         assertTablesAreEqual(prefix + "VENG6511expR: ", tresult, vresult, EPSILON);
 
+        vresult = client.callProcedure("@AdHoc", "SELECT * FROM VENG6511expRC ORDER BY d1, d2;").getResults()[0];
+        tresult = client.callProcedure("@AdHoc", "SELECT d1, d2, MIN(abs(v1)) AS vmin, COUNT(*), MAX(abs(v1)) AS vmax FROM ENG6511 GROUP BY d1, d2 ORDER BY 1, 2;").getResults()[0];
+        assertTablesAreEqual(prefix + "VENG6511expRC: ", tresult, vresult, EPSILON);
+
+        vresult = client.callProcedure("@AdHoc", "SELECT * FROM VENG6511expRCM ORDER BY d1, d2;").getResults()[0];
+        tresult = client.callProcedure("@AdHoc", "SELECT d1, d2, MIN(abs(v1)) AS vmin, COUNT(*), MAX(abs(v1)), COUNT(*), MIN(v1) FROM ENG6511 GROUP BY d1, d2 ORDER BY 1, 2;").getResults()[0];
+        assertTablesAreEqual(prefix + "VENG6511expRCM: ", tresult, vresult, EPSILON);
+
         vresult = client.callProcedure("@AdHoc", "SELECT * FROM VENG6511expLR ORDER BY d1, d2;").getResults()[0];
         tresult = client.callProcedure("@AdHoc", "SELECT d1+1, d2*2, COUNT(*), MIN(v2-1) AS vmin, MAX(v2-1) AS vmax FROM ENG6511 GROUP BY d1+1, d2*2 ORDER BY 1, 2;").getResults()[0];
         assertTablesAreEqual(prefix + "VENG6511expLR: ", tresult, vresult, EPSILON);
@@ -289,6 +288,8 @@ public class TestMaterializedViewSuite extends RegressionSuite {
         subtestIndexMinMaxSinglePartition();
         subtestIndexMinMaxSinglePartitionWithPredicate();
         subtestNullMinMaxSinglePartition();
+        subtestCountStarAnywhereSimple();
+        subtestCountStarAnywhereMultiple();
         subtestENG7872SinglePartition();
         subtestENG6511(false);
     }
@@ -859,6 +860,159 @@ public class TestMaterializedViewSuite extends RegressionSuite {
         assertEquals(4, t.getLong(2));
         assertEquals(200, (int)(t.getDouble(3)));
         assertEquals(9, t.getLong(4));
+    }
+
+    private void subtestCountStarAnywhereSimple() throws IOException, ProcCallException
+    {
+        Client client = getClient();
+        truncateBeforeTest(client);
+        VoltTable[] results = null;
+        VoltTable t;
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE4").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        assertEquals(0, results[0].getRowCount());
+
+        results = client.callProcedure("AddPerson", 1, 1L, 31L, 1000.0, 3, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+        results = client.callProcedure("AddPerson", 1, 2L, 31L, 900.0, 5, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+        results = client.callProcedure("AddPerson", 1, 3L, 31L, 900.0, 1, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+        results = client.callProcedure("AddPerson", 1, 4L, 31L, 2500.0, 5, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+        results = client.callProcedure("AddPerson", 1, 5L, 31L, null, null, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE4").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        t = results[0];
+        assertEquals(1, t.getRowCount());
+        System.out.println(t.toString());
+        t.advanceRow();
+        assertEquals(900, (int)(t.getDouble(2)));
+        assertEquals(5, t.getLong(3));
+        assertEquals(5, t.getLong(4));
+
+        results = client.callProcedure("DeletePerson", 1, 2L, NORMALLY).getResults();
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE4").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        t = results[0];
+        assertEquals(1, t.getRowCount());
+        System.out.println(t.toString());
+        t.advanceRow();
+        assertEquals(900, (int)(t.getDouble(2)));
+        assertEquals(4, t.getLong(3));
+        assertEquals(5, t.getLong(4));
+
+        results = client.callProcedure("UpdatePerson", 1, 3L, 31L, 200, 9).getResults();
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE4").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        t = results[0];
+        assertEquals(1, t.getRowCount());
+        System.out.println(t.toString());
+        t.advanceRow();
+        assertEquals(200, (int)(t.getDouble(2)));
+        assertEquals(4, t.getLong(3));
+        assertEquals(9, t.getLong(4));
+    }
+
+    private void subtestCountStarAnywhereMultiple() throws IOException, ProcCallException
+    {
+        Client client = getClient();
+        truncateBeforeTest(client);
+        VoltTable[] results = null;
+        VoltTable t;
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE5").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        assertEquals(0, results[0].getRowCount());
+
+        results = client.callProcedure("AddPerson", 1, 1L, 31L, 1000.0, 3, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+        results = client.callProcedure("AddPerson", 1, 2L, 31L, 900.0, 5, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+        results = client.callProcedure("AddPerson", 1, 3L, 31L, 900.0, 1, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+        results = client.callProcedure("AddPerson", 1, 4L, 31L, 2500.0, 5, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+        results = client.callProcedure("AddPerson", 1, 5L, 31L, null, null, NORMALLY).getResults();
+        assertEquals(1, results.length);
+        assertEquals(1L, results[0].asScalarLong());
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE5").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        t = results[0];
+        assertEquals(1, t.getRowCount());
+        System.out.println(t.toString());
+        t.advanceRow();
+        assertEquals(900, (int)(t.getDouble(2)));
+        assertEquals(5, t.getLong(3));
+        assertEquals(5, t.getLong(4));
+        assertEquals(5, t.getLong(5));
+        assertEquals(2500, (int)(t.getDouble(6)));
+
+        results = client.callProcedure("DeletePerson", 1, 2L, NORMALLY).getResults();
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE5").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        t = results[0];
+        assertEquals(1, t.getRowCount());
+        System.out.println(t.toString());
+        t.advanceRow();
+        assertEquals(900, (int)(t.getDouble(2)));
+        assertEquals(4, t.getLong(3));
+        assertEquals(5, t.getLong(4));
+        assertEquals(4, t.getLong(5));
+        assertEquals(2500, (int)(t.getDouble(6)));
+
+        results = client.callProcedure("UpdatePerson", 1, 3L, 31L, 200, 9).getResults();
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE5").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        t = results[0];
+        assertEquals(1, t.getRowCount());
+        System.out.println(t.toString());
+        t.advanceRow();
+        assertEquals(200, (int)(t.getDouble(2)));
+        assertEquals(4, t.getLong(3));
+        assertEquals(9, t.getLong(4));
+        assertEquals(4, t.getLong(5));
+        assertEquals(2500, (int)(t.getDouble(6)));
+
+        results = client.callProcedure("UpdatePerson", 1, 3L, 31L, 3000, 2).getResults();
+
+        results = client.callProcedure("@AdHoc", "SELECT * FROM MATPEOPLE5").getResults();
+        assert(results != null);
+        assertEquals(1, results.length);
+        t = results[0];
+        assertEquals(1, t.getRowCount());
+        System.out.println(t.toString());
+        t.advanceRow();
+        assertEquals(1000, (int)(t.getDouble(2)));
+        assertEquals(4, t.getLong(3));
+        assertEquals(5, t.getLong(4));
+        assertEquals(4, t.getLong(5));
+        assertEquals(3000, (int)(t.getDouble(6)));
     }
 
     private void subtestENG7872MP() throws IOException, ProcCallException
@@ -1512,6 +1666,14 @@ public class TestMaterializedViewSuite extends RegressionSuite {
         tresult = client.callProcedure("PROC_ORDER_COUNT_GLOBAL").getResults()[0];
         assertTablesAreEqual(prefix + "ORDER_COUNT_GLOBAL: ", tresult, vresult, EPSILON);
 
+        vresult = client.callProcedure("@AdHoc", "SELECT * FROM ORDER_COUNT_GLOBAL_ANYWHERE ORDER BY 1;").getResults()[0];
+        tresult = client.callProcedure("PROC_ORDER_COUNT_GLOBAL_ANYWHERE").getResults()[0];
+        assertTablesAreEqual(prefix + "ORDER_COUNT_GLOBAL_ANYWHERE: ", tresult, vresult, EPSILON);
+
+        vresult = client.callProcedure("@AdHoc", "SELECT * FROM ORDER_COUNT_GLOBAL_MULTIPLE ORDER BY 1;").getResults()[0];
+        tresult = client.callProcedure("PROC_ORDER_COUNT_GLOBAL_MULTIPLE").getResults()[0];
+        assertTablesAreEqual(prefix + "ORDER_COUNT_GLOBAL_MULTIPLE: ", tresult, vresult, EPSILON);
+
         vresult = client.callProcedure("@AdHoc", "SELECT * FROM ORDER_DETAIL_NOPCOL ORDER BY 1;").getResults()[0];
         tresult = client.callProcedure("PROC_ORDER_DETAIL_NOPCOL").getResults()[0];
         assertTablesAreEqual(prefix + "ORDER_DETAIL_NOPCOL: ", tresult, vresult, EPSILON);
@@ -1686,6 +1848,7 @@ public class TestMaterializedViewSuite extends RegressionSuite {
         if (! isHSQL()) {
             System.out.println("Now testing view data catching-up.");
             try {
+                client.callProcedure("@AdHoc", "DROP PROCEDURE TruncateMatViewDataMP;");
                 client.callProcedure("@AdHoc", "DROP VIEW ORDER_DETAIL_WITHPCOL;");
             } catch (ProcCallException pce) {
                 pce.printStackTrace();
@@ -1704,6 +1867,7 @@ public class TestMaterializedViewSuite extends RegressionSuite {
                                    "JOIN ORDERITEMS ON ORDERS.ORDER_ID = ORDERITEMS.ORDER_ID " +
                                    "JOIN PRODUCTS ON ORDERITEMS.PID = PRODUCTS.PID " +
                     "GROUP BY CUSTOMERS.NAME, ORDERS.ORDER_ID;");
+                client.callProcedure("@AdHoc", "CREATE PROCEDURE FROM CLASS org.voltdb_testprocs.regressionsuites.matviewprocs.TruncateMatViewDataMP");
             } catch (ProcCallException pce) {
                 pce.printStackTrace();
                 fail("Should be able to create a view.");
@@ -2186,6 +2350,43 @@ public class TestMaterializedViewSuite extends RegressionSuite {
                 expectedMsg);
     }
 
+    public void testEng13694() throws Exception {
+        // We used to sometimes fail when updating a materialized view
+        // which was the join of a replicated table and a partitioned
+        // table.  This only happened with fairly large tables.
+        // We don't run this with valgrind.  It's too slow, and
+        // it's not likely to cause uncaught memory leaks anyway.
+        if (!isValgrind()) {
+            Client client = getClient();
+            final int num_prows = 10000;
+            final int num_rrows = 1000;
+            Long[][] prows = new Long[num_prows][2];
+            for (int idx = 0; idx < num_prows; idx += 1) {
+                prows[idx][0] = (long) idx;
+                prows[idx][1] = (long) (idx + 100);
+            }
+            Long[][] rrows = new Long[num_rrows][2];
+            for (int idx = 0; idx < num_rrows; idx +=1) {
+                rrows[idx][0] = (long) idx;
+                rrows[idx][1] = (long) (idx + 100);
+            }
+            shuffleArray(prows);
+            shuffleArray(rrows);
+            // Load up the P1 table.
+            for (int idx = 0; idx < num_prows; idx += 1) {
+                client.callProcedure("ENG13694_P1.insert", prows[idx][0], prows[idx][1]);
+            }
+            // Load up the R1 table.  This is where we expect a crash.
+            for (int idx = 0; idx < num_rrows; idx += 1) {
+                client.callProcedure("ENG13694_R1.insert", rrows[idx][0], rrows[idx][1]);
+            }
+            // Delete the R1 table.  We could see a crash here as well.
+            for (int idx = 0; idx < num_rrows; idx += 1) {
+                client.callProcedure("ENG13694_R1.delete", rrows[idx][0]);
+            }
+        }
+    }
+
     public void testEng11203() throws Exception {
         // This test case has AdHoc DDL, so it cannot be ran in the HSQL backend.
         if (! isHSQL()) {
@@ -2345,6 +2546,12 @@ public class TestMaterializedViewSuite extends RegressionSuite {
         assertContentOfTable(expectedAnswer, vt);
     }
 
+    // procedures used by these tests
+    static final Class<?>[] MP_PROCEDURES = {
+        AddThing.class, TruncateMatViewDataMP.class, AggThings.class,
+        TruncateTables.class, TruncatePeople.class
+    };
+
     /**
      * Build a list of the tests that will be run when TestMaterializedViewSuite gets run by JUnit.
      * Use helper classes that are part of the RegressionSuite framework.
@@ -2365,7 +2572,15 @@ public class TestMaterializedViewSuite extends RegressionSuite {
         String schemaPath = url.getPath();
         project.addSchema(schemaPath);
 
-        project.addProcedures(PROCEDURES);
+        project.addMultiPartitionProcedures(MP_PROCEDURES);
+
+        project.addProcedure(AddPerson.class, "PEOPLE.PARTITION: 0");
+        project.addProcedure(DeletePerson.class, "PEOPLE.PARTITION: 0");
+        project.addProcedure(UpdatePerson.class, "PEOPLE.PARTITION: 0");
+        project.addProcedure(AggAges.class, "PEOPLE.PARTITION: 0");
+        project.addProcedure(SelectAllPeople.class, "PEOPLE.PARTITION: 0");
+        project.addProcedure(OverflowTest.class, "OVERFLOWTEST.COL_1: 1");
+        project.addProcedure(Eng798Insert.class, "ENG798.C1: 0");
 
         /////////////////////////////////////////////////////////////
         // CONFIG #1: 2 Local Sites/Partitions running on JNI backend

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -53,11 +53,11 @@ public interface ConsumerDRGateway extends Promotable {
      */
     void setInitialConversationMembership(byte dataSourceCluster, List<MeshMemberInfo> expectedClusterMembers);
 
-    void initialize(boolean resumeReplication);
+    void initialize(StartAction startAction, boolean doActualRecover);
 
-    void shutdown(final boolean blocking) throws InterruptedException, ExecutionException;
+    void shutdown(final boolean isRestart, final boolean blocking) throws InterruptedException, ExecutionException;
 
-    void restart() throws InterruptedException, ExecutionException;
+    void restart(final boolean blocking) throws InterruptedException, ExecutionException;
 
     DRConsumerMpCoordinator getDRConsumerMpCoordinator();
 
@@ -81,5 +81,11 @@ public interface ConsumerDRGateway extends Promotable {
 
     void resetDrAppliedTracker(byte clusterId);
 
-    void populateEmptyTrackersIfNeeded(byte producerClusterId, int producerPartitionCount);
+    void populateEmptyTrackersIfNeeded(byte producerClusterId, int producerPartitionCount, boolean hasReplicatedStream);
+
+    void dropLocal();
+
+    boolean isSafeForDropLocal();
+
+    void handleProducerClusterElasticChange(byte producerClusterId, int newProducerPartitionCount);
 }

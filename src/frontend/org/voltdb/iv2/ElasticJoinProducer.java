@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -49,7 +49,7 @@ public class ElasticJoinProducer extends JoinProducerBase implements TaskLog {
 
     // a snapshot sink used to stream table data from multiple sources
     private final StreamSnapshotSink m_dataSink;
-    private final Mailbox m_streamSnapshotMb;
+    private Mailbox m_streamSnapshotMb;
 
     private class CompletionAction extends JoinCompletionAction {
         @Override
@@ -117,15 +117,20 @@ public class ElasticJoinProducer extends JoinProducerBase implements TaskLog {
         m_coordinatorHsId = message.m_sourceHSId;
         registerSnapshotMonitor(message.getSnapshotNonce());
 
-        long sinkHSId = m_dataSink.initialize(message.getSnapshotSourceCount(),
-                                              message.getSnapshotBufferPool());
+        // The lowest partition has a single source for all messages whereas all other partitions have a real
+        // data source and a dummy data source for replicated tables that are used to sync up replicated table changes.
+        boolean haveTwoSources = VoltDB.instance().getLowestPartitionId() != m_partitionId;
+
+        long sinkHSId = m_dataSink.initialize(haveTwoSources?2:1,
+                                              message.getSnapshotDataBufferPool(),
+                                              message.getSnapshotCompressedDataBufferPool());
 
         // respond to the coordinator with the sink HSID
         RejoinMessage msg = new RejoinMessage(m_mailbox.getHSId(), -1, sinkHSId);
         m_mailbox.send(m_coordinatorHsId, msg);
-
         m_taskQueue.offer(this);
-        JOINLOG.info("P" + m_partitionId + " received initiation");
+        JOINLOG.info("P" + m_partitionId + " received initiation" +
+                " sinkHSID:" + sinkHSId + " haveTwoSources:" + haveTwoSources);
     }
 
     /**
@@ -164,9 +169,9 @@ public class ElasticJoinProducer extends JoinProducerBase implements TaskLog {
 
             if (m_streamSnapshotMb != null) {
                 VoltDB.instance().getHostMessenger().removeMailbox(m_streamSnapshotMb.getHSId());
+                m_streamSnapshotMb = null;
+                JOINLOG.debug(m_whoami + " data transfer is finished");
             }
-
-            JOINLOG.debug(m_whoami + " data transfer is finished");
 
             if (m_snapshotCompletionMonitor.isDone()) {
                 try {

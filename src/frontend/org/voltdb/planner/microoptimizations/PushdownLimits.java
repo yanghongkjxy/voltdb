@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -19,6 +19,7 @@ package org.voltdb.planner.microoptimizations;
 
 import java.util.ArrayList;
 
+import org.voltdb.planner.AbstractParsedStmt;
 import org.voltdb.plannodes.AbstractJoinPlanNode;
 import org.voltdb.plannodes.AbstractPlanNode;
 import org.voltdb.plannodes.AbstractScanPlanNode;
@@ -29,7 +30,7 @@ import org.voltdb.plannodes.ProjectionPlanNode;
 public class PushdownLimits extends MicroOptimization {
 
     @Override
-    protected AbstractPlanNode recursivelyApply(AbstractPlanNode plan)
+    protected AbstractPlanNode recursivelyApply(AbstractPlanNode plan, AbstractParsedStmt parsedStmt)
     {
         assert(plan != null);
 
@@ -46,7 +47,7 @@ public class PushdownLimits extends MicroOptimization {
 
         for (AbstractPlanNode child : children) {
             // TODO this will break when children feed multiple parents
-            child = recursivelyApply(child);
+            child = recursivelyApply(child, parsedStmt);
             child.clearParents();
             plan.addAndLinkChild(child);
         }
@@ -90,7 +91,7 @@ public class PushdownLimits extends MicroOptimization {
             child.clearChildren();
             child.clearParents();
             child.addAndLinkChild(plan);
-            return recursivelyApply(child);
+            return recursivelyApply(child, parsedStmt);
         }
 
         // push into JOINs

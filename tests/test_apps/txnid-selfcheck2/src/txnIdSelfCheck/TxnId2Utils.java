@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -28,6 +28,7 @@ import org.voltdb.client.Client;
 import org.voltdb.client.ClientResponse;
 import org.voltdb.client.NoConnectionsException;
 import org.voltdb.client.ProcCallException;
+import java.security.SecureRandom;
 
 import java.io.IOException;
 
@@ -45,14 +46,16 @@ public enum TxnId2Utils {;
                 statusString.matches(".*Transaction dropped due to change in mastership. It is possible the transaction was committed.*") ||
                 statusString.matches("(?s).*Transaction being restarted due to fault recovery or shutdown.*") ||
                 statusString.matches("(?s).*Invalid catalog update.  Catalog or deployment change was planned against one version of the cluster configuration but that version was no longer live.*") ||
-                statusString.matches("(?s).*Ad Hoc Planner task queue is full.*");
+                statusString.matches("(?s).*Ad Hoc Planner task queue is full.*") ||
+                statusString.matches("(?s).*Transaction Interrupted.*");
     }
 
     static boolean isServerUnavailableIssue(String statusString) {
         return statusString.matches("(?s).*No response received in the allotted time.*") ||
                 statusString.matches(".*Server is currently unavailable; try again later.*") ||
                 statusString.matches(".*Server is paused.*") ||
-                statusString.matches("(?s).*Server is shutting down.*");
+                statusString.matches("(?s).*Server is shutting down.*") ||
+                statusString.matches("(?s).*VoltDB failed to create the transaction internally.*it should be safe to resend the work, as the work was never started.*"); /*-5 SERVER_UNAVAILABLE*/
     }
 
     static boolean isConnectionTransactionCatalogOrServerUnavailableIssue(String statusString) {
@@ -122,5 +125,15 @@ public enum TxnId2Utils {;
     static long getRowCount(Client client, String tableName) throws NoConnectionsException, IOException, ProcCallException {
         ClientResponse cr = doAdHoc(client, "select count(*) from " + tableName + ";");
         return cr.getResults()[0].asScalarLong();
+    }
+
+    static final String AB = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    static SecureRandom rnd = new SecureRandom();
+
+    static String randomString( int len ){
+        StringBuilder sb = new StringBuilder( len );
+        for( int i = 0; i < len; i++ )
+            sb.append( AB.charAt( rnd.nextInt(AB.length()) ) );
+        return sb.toString();
     }
 }

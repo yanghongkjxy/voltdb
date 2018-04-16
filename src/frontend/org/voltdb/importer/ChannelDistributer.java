@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -29,18 +29,8 @@ import static org.voltcore.zk.ZKUtil.joinZKPath;
 import java.io.File;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Deque;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.NavigableMap;
-import java.util.NavigableSet;
-import java.util.Random;
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
@@ -73,8 +63,8 @@ import org.voltcore.logging.VoltLogger;
 import org.voltcore.utils.CoreUtils;
 import org.voltcore.zk.ZKUtil;
 import org.voltdb.OperationMode;
+import org.voltdb.VoltDB;
 import org.voltdb.VoltZK;
-
 import com.google_voltpatches.common.base.Function;
 import com.google_voltpatches.common.base.Optional;
 import com.google_voltpatches.common.base.Preconditions;
@@ -299,7 +289,9 @@ public class ChannelDistributer implements ChannelChangeCallback {
         m_undispatched = new LinkedList<>();
 
         // Prime directory structure if needed
-        mkdirs(zk, VoltZK.operationMode, OperationMode.RUNNING.getBytes());
+        OperationMode startMode = VoltDB.instance().getStartMode();
+        assert startMode == OperationMode.RUNNING || startMode == OperationMode.PAUSED;
+        mkdirs(zk, VoltZK.operationMode, startMode.getBytes());
         mkdirs(zk, HOST_DN, EMPTY_ARRAY);
         mkdirs(zk, MASTER_DN, EMPTY_ARRAY);
 
@@ -352,10 +344,18 @@ public class ChannelDistributer implements ChannelChangeCallback {
                 !FluentIterable.from(uris).anyMatch(isNull()),
                 "uris set %s contains null elements", uris
                 );
-        Preconditions.checkState(
-                registered.contains(importer),
-                "no callbacks registered for %s", importer
-                );
+        if (!registered.contains(importer)) {
+            if (uris.isEmpty()) {
+                // ImporterLifeCycleManager.stop() calls registerChannels() is called with an empty set of URIs.
+                // If the importer never finished starting, we hit this condition.
+                // This log message is used by the TestImporterStopAfterIncompleteStart JUnit.
+                LOG.info("Skipping channel un-registration for " + importer + " since it did not finish initialization");
+                return;
+            } else {
+                throw new IllegalStateException("no callbacks registered for " + importer
+                        + " - unable to register channels " + Arrays.toString(uris.toArray()));
+            }
+        }
 
         Predicate<ChannelSpec> forImporter = ChannelSpec.importerIs(importer);
         Function<URI,ChannelSpec> asSpec = ChannelSpec.fromUri(importer);
@@ -372,7 +372,7 @@ public class ChannelDistributer implements ChannelChangeCallback {
         ImmutableSortedSet.Builder<ChannelSpec> sbldr = null;
         NavigableSet<ChannelSpec> prev = null;
         SetData setter = null;
-
+        NavigableSet<ChannelSpec> masterList = null;
         // retry writes when merging with stale data
         do {
             prev = m_channels.get(stamp);
@@ -387,13 +387,19 @@ public class ChannelDistributer implements ChannelChangeCallback {
 
             byte [] data = null;
             try {
-                data = asHostData(sbldr.build());
+                masterList = sbldr.build();
+                data = asHostData(masterList);
             } catch (JSONException|IllegalArgumentException e) {
                 throw loggedDistributerException(e, "failed to serialize the registration as json");
             }
 
             setter = new SetData(MASTER_DN, stamp[0], data);
         } while (setter.getCallbackCode() == Code.BADVERSION);
+
+        //synch master channel list after channel registrations.
+        int [] sstamp = new int[]{0};
+        prev = m_channels.get(sstamp);
+        m_channels.compareAndSet(prev, masterList, sstamp[0], stamp[0]);
 
         setter.getStat();
     }
@@ -407,11 +413,6 @@ public class ChannelDistributer implements ChannelChangeCallback {
         Preconditions.checkArgument(
                 importer != null && !importer.trim().isEmpty(),
                 "importer is null or empty"
-                );
-        Preconditions.checkArgument(
-                !m_unregistered.getReference().contains(importer),
-                "cannot re-register importer %s as it was already unregistered",
-                importer
                 );
         callback = checkNotNull(callback, "callback is null");
 
@@ -571,7 +572,7 @@ public class ChannelDistributer implements ChannelChangeCallback {
             } catch (Exception callbackException) {
                 throw loggedDistributerException(
                         callbackException,
-                        "failed to invoke the onChange() calback for importer %s",
+                        "failed to invoke the onChange() callback for importer %s",
                         assignment.getImporter()
                         );
             }
@@ -596,7 +597,7 @@ public class ChannelDistributer implements ChannelChangeCallback {
         } catch (Exception callbackException) {
             fault = Optional.of(loggedDistributerException(
                     callbackException,
-                    "failed to invoke the onClusterStateChange() calback for importer %s",
+                    "failed to invoke the onClusterStateChange() callback for importer %s",
                     e.getKey()
                     ));
         }
@@ -641,10 +642,6 @@ public class ChannelDistributer implements ChannelChangeCallback {
         final NavigableMap<String,AtomicInteger> hosts = m_hosts.getReference();
 
         final int seed;
-
-        AssignChannels(final int seed) {
-            this.seed = seed;
-        }
 
         AssignChannels() {
             seed = System.identityHashCode(this);
@@ -717,12 +714,15 @@ public class ChannelDistributer implements ChannelChangeCallback {
                 // wait for the last write to complete
                 for (SetNodeChannels setter: setters) {
                     if (setter.getCallbackCode() != Code.OK && !m_done.get()) {
+                        // NOTE: It's possible for AssignChannels to run twice in this scenario,
+                        // once by MonitorHostNodes and once by GetChannels following a node loss event.
+                        // This condition is rare, and better than having a scenario where AssignChannels is not run.
                         LOG.warn(
                                 "LEADER (" + m_hostId
                                 + ") Retrying channel assignment because write attempt to "
                                 + setter.path + " failed with " + setter.getCallbackCode()
                                );
-                        m_es.submit(new AssignChannels(seed));
+                        m_es.submit(new GetChannels(MASTER_DN));
                         return;
                     }
                 }
@@ -762,21 +762,10 @@ public class ChannelDistributer implements ChannelChangeCallback {
      * @return a string tag that summarizes the zk versions of opmode and catalog
      */
     public String getClusterTag() {
-        ClusterTagCallback forCatalog = new ClusterTagCallback();
         ClusterTagCallback forOpMode = new ClusterTagCallback();
-
-        m_zk.exists(VoltZK.catalogbytes, false, forCatalog, null);
         m_zk.exists(VoltZK.operationMode, false, forOpMode, null);
-
-        Stat catalogStat = forCatalog.getStat();
         Stat opModeStat = forOpMode.getStat();
-
-        StringBuilder sb = new StringBuilder(16)
-                .append('c')
-                .append(catalogStat != null ? catalogStat.getVersion() : 0)
-                .append("_o")
-                .append(opModeStat != null ? opModeStat.getVersion() : 0);
-        return sb.toString().intern();
+        return String.valueOf((opModeStat != null ? opModeStat.getVersion() : 0));
     }
 
     /**
@@ -1314,7 +1303,8 @@ public class ChannelDistributer implements ChannelChangeCallback {
 
                 int [] stamp = new int[]{0};
                 NavigableSet<ChannelSpec> oldspecs = m_channels.get(stamp);
-                if (stamp[0] >= stat.getVersion()) {
+                //If I have newer version dont process.
+                if (stamp[0] > stat.getVersion()) {
                     return;
                 }
                 if (!m_channels.compareAndSet(oldspecs, channels.get(), stamp[0], stat.getVersion())) {
@@ -1367,7 +1357,7 @@ public class ChannelDistributer implements ChannelChangeCallback {
                 if (Code.get(rc) != Code.OK) {
                     return;
                 }
-                OperationMode next = OperationMode.RUNNING;
+                OperationMode next = VoltDB.instance().getStartMode();
                 if (nodeData != null && nodeData.length > 0) try {
                     next = OperationMode.valueOf(nodeData);
                 } catch (IllegalArgumentException e) {

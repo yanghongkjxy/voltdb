@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -44,35 +44,43 @@
  */
 
 #include "seqscanexecutor.h"
-#include "common/debuglog.h"
-#include "common/common.h"
-#include "common/tabletuple.h"
-#include "common/FatalException.hpp"
 #include "executors/aggregateexecutor.h"
-#include "executors/executorutil.h"
-#include "execution/ProgressMonitorProxy.h"
-#include "expressions/abstractexpression.h"
+#include "executors/insertexecutor.h"
 #include "plannodes/aggregatenode.h"
+#include "plannodes/insertnode.h"
 #include "plannodes/seqscannode.h"
 #include "plannodes/projectionnode.h"
 #include "plannodes/limitnode.h"
-#include "storage/table.h"
 #include "storage/temptable.h"
 #include "storage/tablefactory.h"
-#include "storage/tableiterator.h"
 
 using namespace voltdb;
 
 bool SeqScanExecutor::p_init(AbstractPlanNode* abstract_node,
-                             TempTableLimits* limits)
+                             const ExecutorVector& executorVector)
 {
     VOLT_TRACE("init SeqScan Executor");
 
     SeqScanPlanNode* node = dynamic_cast<SeqScanPlanNode*>(abstract_node);
     assert(node);
-    bool isSubquery = node->isSubQuery();
-    assert(isSubquery || node->getTargetTable());
-    assert((! isSubquery) || (node->getChildren().size() == 1));
+
+    // persistent table scan node must have a target table
+    assert (!node->isPersistentTableScan() || node->getTargetTable());
+
+    // Subquery scans must have a child that produces the output to scan
+    assert (!node->isSubqueryScan() || (node->getChildren().size() == 1));
+
+    // In the case of CTE scans, we will resolve target table below.
+    assert (!node->isCteScan() || (node->getChildren().size() == 0
+                                   && node->getTargetTable() == NULL));
+
+    // Inline aggregation can be serial, partial or hash
+    m_aggExec = voltdb::getInlineAggregateExecutor(node);
+    m_insertExec = voltdb::getInlineInsertExecutor(node);
+    // For the moment we will not produce a plan with both an
+    // inline aggregate and an inline insert node.  This just
+    // confuses things.
+    assert(m_aggExec == NULL || m_insertExec == NULL);
 
     //
     // OPTIMIZATION: If there is no predicate for this SeqScan,
@@ -82,26 +90,27 @@ bool SeqScanExecutor::p_init(AbstractPlanNode* abstract_node,
     // the tuples. We are guarenteed that no Executor will ever
     // modify an input table, so this operation is safe
     //
-    if (node->getPredicate() != NULL || node->getInlinePlanNodes().size() > 0) {
-        // Create output table based on output schema from the plan
-        const std::string& temp_name = (node->isSubQuery()) ?
+    if (node->getPredicate() != NULL || node->getInlinePlanNodes().size() > 0 || node->isCteScan()) {
+        // TODO: can this optimization be performed for CTE scans?
+        if (m_insertExec) {
+            setDMLCountOutputTable(executorVector.limits());
+        }
+        else {
+            // Create output table based on output schema from the plan.
+            std::string temp_name = (node->isSubqueryScan()) ?
                 node->getChildren()[0]->getOutputTable()->name():
-                node->getTargetTable()->name();
-        setTempOutputTable(limits, temp_name);
+                node->getTargetTableName();
+            setTempOutputTable(executorVector, temp_name);
+        }
     }
-    //
-    // Otherwise create a new temp table that mirrors the
-    // output schema specified in the plan (which should mirror
-    // the output schema for any inlined projection)
-    //
     else {
-        node->setOutputTable(isSubquery ?
+        // Otherwise create a new temp table that mirrors the output
+        // schema specified in the plan (which should mirror the
+        // output schema for any inlined projection)
+        node->setOutputTable(node->isSubqueryScan() ?
                              node->getChildren()[0]->getOutputTable() :
                              node->getTargetTable());
     }
-
-    // Inline aggregation can be serial, partial or hash
-    m_aggExec = voltdb::getInlineAggregateExecutor(node);
 
     return true;
 }
@@ -110,15 +119,26 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
     SeqScanPlanNode* node = dynamic_cast<SeqScanPlanNode*>(m_abstractNode);
     assert(node);
 
+
     // Short-circuit an empty scan
     if (node->isEmptyScan()) {
         VOLT_DEBUG ("Empty Seq Scan :\n %s", node->getOutputTable()->debug().c_str());
         return true;
     }
 
-    Table* input_table = (node->isSubQuery()) ?
-            node->getChildren()[0]->getOutputTable():
-            node->getTargetTable();
+    Table* input_table = NULL;
+    if (node->isCteScan()) {
+        ExecutorContext* ec = ExecutorContext::getExecutorContext();
+        input_table = ec->getCommonTable(node->getTargetTableName(),
+                                         node->getCteStmtId());
+    }
+    else if (node->isSubqueryScan()) {
+        input_table = node->getChildren()[0]->getOutputTable();
+    }
+    else {
+        assert (node->isPersistentTableScan());
+        input_table = node->getTargetTable();
+    }
 
     assert(input_table);
 
@@ -141,9 +161,9 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
     // projection operations in execute
     //
     int num_of_columns = -1;
-    ProjectionPlanNode* projection_node = dynamic_cast<ProjectionPlanNode*>(node->getInlinePlanNode(PLAN_NODE_TYPE_PROJECTION));
-    if (projection_node != NULL) {
-        num_of_columns = static_cast<int> (projection_node->getOutputColumnExpressions().size());
+    ProjectionPlanNode* projectionNode = dynamic_cast<ProjectionPlanNode*>(node->getInlinePlanNode(PLAN_NODE_TYPE_PROJECTION));
+    if (projectionNode != NULL) {
+        num_of_columns = static_cast<int> (projectionNode->getOutputColumnExpressions().size());
     }
     //
     // OPTIMIZATION: NESTED LIMIT
@@ -159,8 +179,9 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
     // at the TargetTable. Therefore, there is nothing we more we need
     // to do here
     //
-    if (node->getPredicate() != NULL || projection_node != NULL ||
-        limit_node != NULL || m_aggExec != NULL)
+    if (node->getPredicate() != NULL || projectionNode != NULL ||
+        limit_node != NULL || m_aggExec != NULL || m_insertExec != NULL ||
+        node->isCteScan())
     {
         //
         // Just walk through the table using our iterator and apply
@@ -187,14 +208,46 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
         ProgressMonitorProxy pmp(m_engine->getExecutorContext(), this);
         TableTuple temp_tuple;
         assert(m_tmpOutputTable);
-        if (m_aggExec != NULL) {
+        if (m_aggExec != NULL || m_insertExec != NULL) {
             const TupleSchema * inputSchema = input_table->schema();
-            if (projection_node != NULL) {
-                inputSchema = projection_node->getOutputTable()->schema();
+            if (projectionNode != NULL) {
+                inputSchema = projectionNode->getOutputTable()->schema();
             }
-            temp_tuple = m_aggExec->p_execute_init(params, &pmp,
-                    inputSchema, m_tmpOutputTable, &postfilter);
-        } else {
+            if (m_aggExec != NULL) {
+                temp_tuple = m_aggExec->p_execute_init(params, &pmp,
+                        inputSchema, m_tmpOutputTable, &postfilter);
+            }
+            else {
+                // We may actually find out during initialization
+                // that we are done.  The p_execute_init operation
+                // will tell us by returning false if so.  See the
+                // definition of InsertExecutor::p_execute_init.
+                //
+                // We know we have an inline insert here.  So there
+                // must have been an insert into select.  The input
+                // schema is the schema of the output of the select
+                // statement.  The inline projection wants to
+                // project the columns of the scanned table onto
+                // the select columns.
+                //
+                // Now, we don't have a table between the inline projection
+                // and the inline insert - that's why they are
+                // inlined.  The p_execute_init function will compute
+                // this and tell us by setting temp_tuple.  Note
+                // that temp_tuple is initialized if this returns
+                // false.  If it returns true all bets are off.
+                if (!m_insertExec->p_execute_init(inputSchema, m_tmpOutputTable, temp_tuple)) {
+                    return true;
+                }
+                // We should have as many expressions in the
+                // projection node as there are columns in the
+                // input schema if there is an inline projection.
+                assert(projectionNode != NULL
+                          ? (temp_tuple.getSchema()->columnCount() == projectionNode->getOutputColumnExpressions().size())
+                          : true);
+            }
+        }
+        else {
             temp_tuple = m_tmpOutputTable->tempTuple();
         }
 
@@ -218,18 +271,21 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
                 // Nested Projection
                 // Project (or replace) values from input tuple
                 //
-                if (projection_node != NULL)
+                if (projectionNode != NULL)
                 {
                     VOLT_TRACE("inline projection...");
+                    // Project the scanned table row onto
+                    // the columns of the select list in the
+                    // select statement.
                     for (int ctr = 0; ctr < num_of_columns; ctr++) {
-                        NValue value = projection_node->getOutputColumnExpressions()[ctr]->eval(&tuple, NULL);
+                        NValue value = projectionNode->getOutputColumnExpressions()[ctr]->eval(&tuple, NULL);
                         temp_tuple.setNValue(ctr, value);
                     }
-                    outputTuple(postfilter, temp_tuple);
+                    outputTuple(temp_tuple);
                 }
                 else
                 {
-                    outputTuple(postfilter, tuple);
+                    outputTuple(tuple);
                 }
                 pmp.countdownProgress();
             }
@@ -237,6 +293,9 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
 
         if (m_aggExec != NULL) {
             m_aggExec->p_execute_finish();
+        }
+        else if (m_insertExec != NULL) {
+            m_insertExec->p_execute_finish();
         }
     }
     //* for debug */std::cout << "SeqScanExecutor: node id " << node->getPlanNodeId() <<
@@ -248,9 +307,18 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
     return true;
 }
 
-void SeqScanExecutor::outputTuple(CountingPostfilter& postfilter, TableTuple& tuple) {
+/*
+ * We may output a tuple to an inline aggregate or
+ * inline insert node.  If there is a limit or projection, this will have
+ * been applied already.  So we don't really care about those here.
+ */
+void SeqScanExecutor::outputTuple(TableTuple& tuple) {
     if (m_aggExec != NULL) {
         m_aggExec->p_execute_tuple(tuple);
+        return;
+    }
+    else if (m_insertExec != NULL) {
+        m_insertExec->p_execute_tuple(tuple);
         return;
     }
     //

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -43,7 +43,7 @@
  */
 
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -95,26 +95,26 @@ import org.voltcore.utils.Pair;
 public class PicoNetwork implements Runnable, Connection, IOStatsIntf
 {
     private static final VoltLogger m_logger = new VoltLogger(VoltNetwork.class.getName());
-    private static final VoltLogger networkLog = new VoltLogger("NETWORK");
+    protected static final VoltLogger networkLog = new VoltLogger("NETWORK");
 
-    private final Selector m_selector;
-    private final NetworkDBBPool m_pool = new NetworkDBBPool(64);
-    private final NIOReadStream m_readStream = new NIOReadStream();
-    private final PicoNIOWriteStream m_writeStream = new PicoNIOWriteStream();
-    private final ConcurrentLinkedQueue<Runnable> m_tasks = new ConcurrentLinkedQueue<Runnable>();
-    private volatile boolean m_shouldStop = false;//volatile boolean is sufficient
-    private long m_messagesRead;
-    private int m_interestOps = 0;
-    private final SocketChannel m_sc;
-    private final SelectionKey m_key;
-    private InputHandler m_ih;
+    protected final Selector m_selector;
+    protected final NetworkDBBPool m_pool = new NetworkDBBPool(64);
+    protected final NIOReadStream m_readStream = new NIOReadStream();
+    protected PicoNIOWriteStream m_writeStream;
+    protected final ConcurrentLinkedQueue<Runnable> m_tasks = new ConcurrentLinkedQueue<Runnable>();
+    protected volatile boolean m_shouldStop = false;//volatile boolean is sufficient
+    protected long m_messagesRead;
+    protected int m_interestOps = 0;
+    protected final SocketChannel m_sc;
+    protected final SelectionKey m_key;
+    protected InputHandler m_ih;
 
     private final Thread m_thread;
     volatile String m_remoteHostname = null;
     final InetSocketAddress m_remoteSocketAddress;
     final String m_remoteSocketAddressString;
     private volatile String m_remoteHostAndAddressAndPort;
-    private String m_toString;
+    private String m_threadName;
     private Set<Long> m_verbotenThreads;
 
     /**
@@ -124,24 +124,37 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
     public void start(InputHandler ih, Set<Long> verbotenThreads) {
         m_ih = ih;
         m_verbotenThreads = verbotenThreads;
+        startSetup();
         m_thread.start();
     }
 
-    public PicoNetwork(SocketChannel sc) {
+    protected void startSetup() {
+        m_writeStream = new PicoNIOWriteStream();
+    }
+
+    /**
+     * Create a pico network thread
+     * @param sc  SocketChannel
+     * @param isSecondary  Is this a secondary thread?
+     */
+    public PicoNetwork(SocketChannel sc, boolean isSecondary) {
         m_sc = sc;
         InetSocketAddress remoteAddress = (InetSocketAddress)sc.socket().getRemoteSocketAddress();
         m_remoteSocketAddress = remoteAddress;
         m_remoteSocketAddressString = remoteAddress.getAddress().getHostAddress();
         m_remoteHostAndAddressAndPort = "/" + m_remoteSocketAddressString + ":" + m_remoteSocketAddress.getPort();
-        m_toString = super.toString() + ":" + m_remoteHostAndAddressAndPort;
         String remoteHost = ReverseDNSCache.hostnameOrAddress(m_remoteSocketAddress.getAddress());
         if (!remoteHost.equals(m_remoteSocketAddress.getAddress().getHostAddress())) {
             m_remoteHostname = remoteHost;
             m_remoteHostAndAddressAndPort = remoteHost + m_remoteHostAndAddressAndPort;
-            m_toString = super.toString() + ":" + m_remoteHostAndAddressAndPort;
+        }
+        if (isSecondary) {
+            m_threadName = super.toString() + ":" + m_remoteHostAndAddressAndPort + "(s)";
+        } else {
+            m_threadName = super.toString() + ":" + m_remoteHostAndAddressAndPort;
         }
 
-        m_thread = new Thread(this, "Pico Network - " + m_toString);
+        m_thread = new Thread(this, "Pico Network - " + m_threadName);
         m_thread.setDaemon(true);
         try {
             sc.configureBlocking(false);
@@ -168,7 +181,7 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
 
     //Track how busy the thread is and spin once
     //if there is always work
-    private boolean m_hadWork = false;
+    protected boolean m_hadWork = false;
 
     @Override
     public void run() {
@@ -198,7 +211,7 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
         } catch (CancelledKeyException e) {
             networkLog.warn(
                     "Had a cancelled key exception for "
-                            + m_toString, e);
+                            + m_threadName, e);
         } catch (IOException e) {
             final String trimmed = e.getMessage() == null ? "" : e.getMessage().trim();
             if ((e instanceof IOException && (trimmed.equalsIgnoreCase("Connection reset by peer") || trimmed.equalsIgnoreCase("broken pipe"))) ||
@@ -225,7 +238,7 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
         }
     }
 
-    private void dispatchReadStream() throws IOException {
+    protected void dispatchReadStream() throws IOException {
         if (readyForRead()) {
             if (fillReadStream() > 0) m_hadWork = true;
             ByteBuffer message;
@@ -276,7 +289,7 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
         return read;
     }
 
-    private void drainWriteStream() throws IOException {
+    protected void drainWriteStream() throws IOException {
         /*
          * Drain the write stream
          */
@@ -303,7 +316,7 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
     }
 
     private boolean m_alreadyStopping = false;
-    private void safeStopping() {
+    protected void safeStopping() {
         if (!m_alreadyStopping) {
             m_alreadyStopping = true;
             m_ih.stopping(this);
@@ -331,7 +344,7 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
                 }
             }
         } finally {
-            networkLog.debug("Closing channel " + m_toString);
+            networkLog.debug("Closing channel " + m_threadName);
             try {
                 m_sc.close();
             } catch (IOException e) {
@@ -423,7 +436,7 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
 
     @Override
     public NIOReadStream readStream() {
-        throw new UnsupportedOperationException();
+        return m_readStream;
     }
 
     @Override
@@ -431,14 +444,14 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
         throw new UnsupportedOperationException();
     }
 
-    private void disableWriteSelection() {
+    public void disableWriteSelection() {
         if ((m_interestOps & SelectionKey.OP_WRITE) != 0) {
             m_interestOps &= ~SelectionKey.OP_WRITE;
             m_key.interestOps(m_interestOps);
         }
     }
 
-    private void enableWriteSelection() {
+    public void enableWriteSelection() {
         if ((m_interestOps & SelectionKey.OP_WRITE) == 0) {
             m_interestOps |= SelectionKey.OP_WRITE;
             m_key.interestOps(m_interestOps);
@@ -517,6 +530,20 @@ public class PicoNetwork implements Runnable, Connection, IOStatsIntf
             }
         });
         m_selector.wakeup();
+    }
+
+    public FutureTask<Void> enqueueAndDrain(final ByteBuffer buf) {
+        Callable<Void> task = new Callable<Void>() {
+            public Void call() throws Exception {
+                m_writeStream.enqueue(buf);
+                drainWriteStream();
+                return null;
+            }
+        };
+        FutureTask<Void> ft = new FutureTask<Void>(task);
+        m_tasks.offer(ft);
+        m_selector.wakeup();
+        return ft;
     }
 
     boolean readyForRead() {

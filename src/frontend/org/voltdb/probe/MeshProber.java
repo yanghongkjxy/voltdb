@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -378,7 +378,8 @@ public class MeshProber implements JoinAcceptor {
 
     @Override
     public JSONObject decorate(JSONObject jo, Optional<Boolean> paused) {
-        return paused.map(p -> asHostCriteria(p).appendTo(jo)).orElse(asHostCriteria().appendTo(jo));
+        Optional<JSONObject> decorated = paused.map(p -> asHostCriteria(p).appendTo(jo));
+        return decorated.isPresent() ? decorated.get() : asHostCriteria().appendTo(jo);
     }
 
     @Override

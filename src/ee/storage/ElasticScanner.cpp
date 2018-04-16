@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -46,7 +46,7 @@ ElasticScanner::~ElasticScanner()
 bool ElasticScanner::continueScan() {
     if (!m_scanComplete) {
         // First block or end of block?
-        if (m_currentBlockPtr == NULL || m_tupleIndex >= m_currentBlockPtr->unusedTupleBoundry()) {
+        if (m_currentBlockPtr == NULL || m_tupleIndex >= m_currentBlockPtr->unusedTupleBoundary()) {
             // No more blocks?
             m_scanComplete = (m_blockIterator == m_blockEnd);
             if (!m_scanComplete) {
@@ -75,7 +75,7 @@ bool ElasticScanner::next(TableTuple &out)
         // Sanity checks.
         assert(m_tuplePtr < m_currentBlockPtr.get()->address() + m_table.getTableAllocationSize());
         assert(m_tuplePtr < m_currentBlockPtr.get()->address() + (m_tupleSize * m_table.getTuplesPerBlock()));
-        assert (out.sizeInValues() == m_table.columnCount());
+        assert (out.columnCount() == m_table.columnCount());
         // Grab the tuple pointer.
         out.move(m_tuplePtr);
         // Shift to the next tuple in block.

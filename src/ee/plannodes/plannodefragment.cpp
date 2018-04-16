@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -45,13 +45,11 @@
 
 #include <stdexcept>
 #include <sstream>
-#include <memory>
 
 #include <boost/foreach.hpp>
 
 #include "common/FatalException.hpp"
 #include "plannodefragment.h"
-#include "catalog/catalog.h"
 #include "abstractplannode.h"
 
 using namespace std;
@@ -61,7 +59,8 @@ using namespace voltdb;
 PlanNodeFragment::PlanNodeFragment() :
     m_serializedType("org.voltdb.plannodes.PlanNodeList"),
     m_idToNodeMap(),
-    m_stmtExecutionListMap()
+    m_stmtExecutionListMap(),
+    m_isLargeQuery(false)
 {}
 
 PlanNodeFragment::PlanNodeFragment(AbstractPlanNode *root_node) :
@@ -124,6 +123,14 @@ PlanNodeFragment::fromJSONObject(PlannerDomValue obj)
 {
     PlanNodeFragment *retval = new PlanNodeFragment();
     auto_ptr<PlanNodeFragment> pnf(retval);
+
+    if (obj.hasNonNullKey("IS_LARGE_QUERY")) {
+        retval->m_isLargeQuery = obj.valueForKey("IS_LARGE_QUERY").asBool();
+    }
+    else {
+        retval->m_isLargeQuery = false;
+    }
+
     // read and construct plannodes from json object
     if (obj.hasNonNullKey("PLAN_NODES_LISTS")) {
         PlannerDomValue planNodesListArray = obj.valueForKey("PLAN_NODES_LISTS");

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -104,7 +104,7 @@ bool CopyOnWriteIterator::next(TableTuple &out) {
         return false;
     }
     while (true) {
-        if (m_blockOffset >= m_currentBlock->unusedTupleBoundry()) {
+        if (m_blockOffset >= m_currentBlock->unusedTupleBoundary()) {
             if (m_blockIterator == m_end) {
                 m_surgeon->snapshotFinishedScanningBlock(m_currentBlock, TBPtr());
                 break;
@@ -130,7 +130,7 @@ bool CopyOnWriteIterator::next(TableTuple &out) {
         }
         assert(m_location < m_currentBlock.get()->address() + m_table->getTableAllocationSize());
         assert(m_location < m_currentBlock.get()->address() + (m_table->getTupleLength() * m_table->getTuplesPerBlock()));
-        assert (out.sizeInValues() == m_table->columnCount());
+        assert (out.columnCount() == m_table->columnCount());
         m_blockOffset++;
         out.move(m_location);
         const bool active = out.isActive();
@@ -164,7 +164,7 @@ int64_t CopyOnWriteIterator::countRemaining() const {
     TBMapI blockIterator = m_blockIterator;
     int64_t count = 0;
     while (true) {
-        if (blockOffset >= currentBlock->unusedTupleBoundry()) {
+        if (blockOffset >= currentBlock->unusedTupleBoundary()) {
             if (blockIterator == m_end) {
                 break;
             }

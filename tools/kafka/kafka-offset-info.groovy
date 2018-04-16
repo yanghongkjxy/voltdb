@@ -2,7 +2,7 @@
 
 /*
  * This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -84,7 +84,7 @@ class Attempter<P,R> {
 def cli = new CliBuilder(usage: 'groovy kafka-offset-info.groovy [options]')
 cli.with {
     b(longOpt: 'brokers','kafka comma delimited broker list', required:true, args:1)
-    g(longOpt: 'group', 'consumenr group', required:true, args:1)
+    g(longOpt: 'group', 'consumer group', required:true, args:1)
     t(longOpt: 'topic', 'kafka topic', required:true, args:1)
     h(longOpt: 'help', 'usage information', required: false)
     s(longOpt: 'save', 'save offsets to [file-name]', args:1)

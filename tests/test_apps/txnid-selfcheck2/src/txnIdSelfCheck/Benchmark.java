@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -23,41 +23,23 @@
 
 package txnIdSelfCheck;
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.lang.Thread.UncaughtExceptionHandler;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-
 import org.voltcore.logging.VoltLogger;
 import org.voltdb.CLIConfig;
 import org.voltdb.ClientResponseImpl;
 import org.voltdb.VoltTable;
-import org.voltdb.client.Client;
-import org.voltdb.client.ClientConfig;
-import org.voltdb.client.ClientFactory;
-import org.voltdb.client.ClientImpl;
-import org.voltdb.client.ClientResponse;
-import org.voltdb.client.ClientStatusListenerExt;
-import org.voltdb.client.ProcCallException;
-import org.voltdb.client.ProcedureCallback;
+import org.voltdb.client.*;
 import org.voltdb.utils.MiscUtils;
+
+import java.io.FileWriter;
+import java.io.IOException;
+import java.lang.Thread.UncaughtExceptionHandler;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class Benchmark {
 
@@ -161,7 +143,7 @@ public class Benchmark {
         String statsfile = "";
 
         @Option(desc = "Allow experimental in-procedure adhoc statments.")
-        boolean allowinprocadhoc = true;
+        boolean allowinprocadhoc = false;
 
         @Option(desc = "Allow set ratio of mp to sp workload.")
         float mpratio = (float)0.20;
@@ -177,7 +159,7 @@ public class Benchmark {
 
         @Option(desc = "Allow disabling different threads for testing specific functionality. ")
         String disabledthreads = "none";
-        //threads: "clients,partBiglt,replBiglt,partTrunclt,replTrunclt,partCappedlt,replCappedlt,partLoadlt,replLoadlt,readThread,adHocMayhemThread,idpt"
+        //threads: "clients,partBiglt,replBiglt,partTrunclt,replTrunclt,partCappedlt,replCappedlt,partLoadlt,replLoadlt,readThread,adHocMayhemThread,idpt,updateclasses"
         // Biglt,Trunclt,Cappedlt,Loadlt are also recognized and apply to BOTH part and repl threads
         ArrayList<String> disabledThreads = null;
 
@@ -500,9 +482,7 @@ public class Benchmark {
                         (new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.S")).format(new Date(lastProgressTimestamp)) + ")"));
 
         if (diffInSeconds > config.progresstimeout) {
-            log.error("No progress was made in over " + diffInSeconds + " seconds while connected to a cluster. Exiting.");
-            printJStack();
-            System.exit(-1);
+            hardStop("No progress was made in over " + diffInSeconds + " seconds while connected to a cluster. Exiting.");
         }
     }
 
@@ -553,12 +533,14 @@ public class Benchmark {
     CappedTableLoader partCappedlt = null;
     CappedTableLoader replCappedlt = null;
     LoadTableLoader partLoadlt = null;
+    WLoadTableLoader partLoadltW = null;
     LoadTableLoader replLoadlt = null;
     ReadThread readThread = null;
     AdHocMayhemThread adHocMayhemThread = null;
     InvokeDroppedProcedureThread idpt = null;
     DdlThread ddlt = null;
     List<ClientThread> clientThreads = null;
+    UpdateClassesThread updcls = null;
 
 
     /**
@@ -703,14 +685,17 @@ public class Benchmark {
         }
 
         if (!(config.disabledThreads.contains("partLoadlt") || config.disabledThreads.contains("Loadlt"))) {
+            partLoadltW = new WLoadTableLoader(client, "T_PAYMENT50",
+                    (config.partfillerrowmb * 1024 * 1024) / config.fillerrowsize, 500, permits, false, 1);
+            partLoadltW.start();
             partLoadlt = new LoadTableLoader(client, "loadp",
-                (config.partfillerrowmb * 1024 * 1024) / config.fillerrowsize, 50, permits, false, 0);
+                    (config.partfillerrowmb * 1024 * 1024) / config.fillerrowsize, 500, permits, false, 0);
             partLoadlt.start();
         }
         replLoadlt = null;
         if (config.mpratio > 0.0 && !(config.disabledThreads.contains("replLoadlt") || config.disabledThreads.contains("Loadlt"))) {
             replLoadlt = new LoadTableLoader(client, "loadmp",
-                    (config.replfillerrowmb * 1024 * 1024) / config.fillerrowsize, 3, permits, true, -1);
+                    (config.replfillerrowmb * 1024 * 1024) / config.fillerrowsize, 30, permits, true, -1);
             replLoadlt.start();
         }
         if (!config.disabledThreads.contains("readThread")) {
@@ -732,7 +717,10 @@ public class Benchmark {
             ddlt = new DdlThread(client);
             // XXX/PSR ddlt.start();
         }
-
+        if (!config.disabledThreads.contains("updateclasses")) {
+            updcls = new UpdateClassesThread(client, config.duration);
+            updcls.start();
+        }
         log.info("All threads started...");
 
         while (true) {

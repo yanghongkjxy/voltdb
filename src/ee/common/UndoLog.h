@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -29,6 +29,8 @@
 
 namespace voltdb
 {
+    static const size_t MAX_CACHED_POOLS = 192;
+
     class UndoLog
     {
     public:
@@ -41,6 +43,8 @@ namespace voltdb
          * issue in VoltDBEngine's destructor.
          */
         void clear();
+
+        inline void setUndoLogForLowestSite() { m_undoLogForLowestSite = true; }
 
         inline UndoQuantum* generateUndoQuantum(int64_t nextUndoToken)
         {
@@ -61,7 +65,7 @@ namespace voltdb
                 m_undoDataPools.pop_back();
             }
             assert(pool);
-            UndoQuantum *undoQuantum = new (*pool) UndoQuantum(nextUndoToken, pool);
+            UndoQuantum *undoQuantum = new (*pool) UndoQuantum(nextUndoToken, pool, m_undoLogForLowestSite);
             m_undoQuantums.push_back(undoQuantum);
             return undoQuantum;
         }
@@ -105,10 +109,15 @@ namespace voltdb
                 }
 
                 m_undoQuantums.pop_back();
-                // Destroy the quantum, but retain its pool for reuse.
+                // Destroy the quantum, but possibly retain its pool for reuse.
                 Pool *pool = undoQuantum->undo();
                 pool->purge();
-                m_undoDataPools.push_back(pool);
+                if (m_undoDataPools.size() < MAX_CACHED_POOLS) {
+                    m_undoDataPools.push_back(pool);
+                }
+                else {
+                    delete pool; pool = NULL;
+                }
 
                 if(undoQuantumToken == undoToken) {
                     return;
@@ -135,10 +144,15 @@ namespace voltdb
                 }
 
                 m_undoQuantums.pop_front();
-                // Destroy the quantum, but retain its pool for reuse.
+                // Destroy the quantum, but possibly retain its pool for reuse.
                 Pool *pool = undoQuantum->release();
                 pool->purge();
-                m_undoDataPools.push_back(pool);
+                if (m_undoDataPools.size() < MAX_CACHED_POOLS) {
+                    m_undoDataPools.push_back(pool);
+                }
+                else {
+                    delete pool; pool = NULL;
+                }
                 if(undoQuantumToken == undoToken) {
                     return;
                 }
@@ -187,6 +201,7 @@ namespace voltdb
 
         std::vector<Pool*> m_undoDataPools;
         std::deque<UndoQuantum*> m_undoQuantums;
+        bool m_undoLogForLowestSite;
     };
 }
 #endif /* UNDOLOG_H_ */

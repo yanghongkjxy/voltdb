@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -17,12 +17,12 @@
 #ifndef PERSISTENTTABLEUNDOSWAPTABLEACTION_H_
 #define PERSISTENTTABLEUNDOSWAPTABLEACTION_H_
 
-#include "common/UndoAction.h"
+#include "common/UndoReleaseAction.h"
 #include "storage/persistenttable.h"
 
 namespace voltdb {
 
-class PersistentTableUndoSwapTableAction: public UndoAction {
+class PersistentTableUndoSwapTableAction: public UndoReleaseAction {
 public:
     PersistentTableUndoSwapTableAction(
             PersistentTable* theTable,
@@ -57,10 +57,12 @@ private:
         ExecutorContext* executorContext = ExecutorContext::getExecutorContext();
         int64_t uniqueId = executorContext->currentUniqueId();
         AbstractDRTupleStream* drStream = executorContext->drStream();
-        drStream->endTransaction(uniqueId);
-        drStream->extendBufferChain(0);
+        if (drStream->drStreamStarted()) {
+            drStream->endTransaction(uniqueId);
+            drStream->extendBufferChain(0);
+        }
         AbstractDRTupleStream* drReplicatedStream = executorContext->drReplicatedStream();
-        if (drReplicatedStream) {
+        if (drReplicatedStream && drReplicatedStream->drStreamStarted()) {
             drReplicatedStream->endTransaction(uniqueId);
             drReplicatedStream->extendBufferChain(0);
         }

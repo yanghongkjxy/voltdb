@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -24,11 +24,15 @@
 package org.voltdb.planner;
 
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.EmptyStackException;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.Stack;
 
 import org.apache.commons.lang3.StringUtils;
+import org.hsqldb_voltpatches.HSQLInterface.HSQLParseException;
+import org.hsqldb_voltpatches.VoltXMLElement;
 import org.voltdb.catalog.Catalog;
 import org.voltdb.catalog.Database;
 import org.voltdb.compiler.DeterminismMode;
@@ -135,10 +139,25 @@ public class PlannerTestCase extends TestCase {
         return cp;
     }
 
-    protected CompiledPlan compileAdHocPlan(String sql,
-                                            boolean inferPartitioning,
-                                            boolean forcedSP) {
-        return compileAdHocPlan(sql, inferPartitioning, forcedSP, DeterminismMode.SAFER);
+    /**
+     * This is exactly like compileAdHocPlan, but it may throw an
+     * error.  We added this because we sometimes call this from a
+     * planner test just to find out if a string compiles.  We
+     * need to know more about failures than just that they failed.
+     * We need to know why the failed so we can check the error
+     * messages.
+     *
+     * @param sql
+     * @return
+     */
+    protected CompiledPlan compileAdHocPlanThrowing(String sql,
+                                                    boolean inferPartitioning,
+                                                    boolean forcedSP,
+                                                    DeterminismMode detMode) {
+        CompiledPlan cp = null;
+        cp = m_aide.compileAdHocPlan(sql, inferPartitioning, forcedSP, detMode);
+        assertTrue(cp != null);
+        return cp;
     }
 
     protected List<AbstractPlanNode> compileInvalidToFragments(String sql) {
@@ -149,8 +168,11 @@ public class PlannerTestCase extends TestCase {
 
     /** A helper here where the junit test can assert success */
     protected List<AbstractPlanNode> compileToFragments(String sql) {
-        boolean planForSinglePartitionFalse = false;
-        return compileWithJoinOrderToFragments(sql, planForSinglePartitionFalse, m_noJoinOrder);
+        return compileToFragments(sql, false);
+    }
+
+    protected List<AbstractPlanNode> compileToFragments(String sql, boolean planForSinglePartition) {
+        return compileWithJoinOrderToFragments(sql, planForSinglePartition, m_noJoinOrder);
     }
 
     protected List<AbstractPlanNode> compileToFragmentsForSinglePartition(String sql) {
@@ -190,6 +212,10 @@ public class PlannerTestCase extends TestCase {
         assertFalse(pn.isEmpty());
         assertTrue(pn.get(0) != null);
         if (planForSinglePartition) {
+            if (pn.size() != 1) {
+                System.err.printf("Plan: %s\n", pn);
+                System.err.printf("Error: pn.size == %d, should be 1\n", pn.size());
+            }
             assertTrue(pn.size() == 1);
         }
         return pn;
@@ -232,12 +258,17 @@ public class PlannerTestCase extends TestCase {
      */
     protected AbstractPlanNode compileToTopDownTree(String sql,
             int nOutputColumns, PlanNodeType... nodeTypes) {
+        return compileToTopDownTree(sql, nOutputColumns, false, nodeTypes);
+    }
+
+    protected AbstractPlanNode compileToTopDownTree(String sql,
+            int nOutputColumns, boolean hasOptionalSelectProjection, PlanNodeType... nodeTypes) {
         // Yes, we ARE assuming that test queries don't
         // contain quoted question marks.
         int paramCount = StringUtils.countMatches(sql, "?");
         AbstractPlanNode result = compileSPWithJoinOrder(sql, paramCount, null);
         assertEquals(nOutputColumns, result.getOutputSchema().size());
-        assertTopDownTree(result, nodeTypes);
+        assertTopDownTree(result, hasOptionalSelectProjection, nodeTypes);
         return result;
     }
 
@@ -294,6 +325,10 @@ public class PlannerTestCase extends TestCase {
         return aggNodes;
     }
 
+
+    protected VoltXMLElement compileToXML(String SQL) throws HSQLParseException {
+        return m_aide.compileToXML(SQL);
+    }
 
     protected void setupSchema(URL ddlURL, String basename,
                                boolean planForSinglePartition) throws Exception {
@@ -430,12 +465,28 @@ public class PlannerTestCase extends TestCase {
     protected static AbstractPlanNode followAssertedLeftChain(
             AbstractPlanNode start,
             PlanNodeType startType, PlanNodeType... nodeTypes) {
+        return followAssertedLeftChain(start, false, startType, nodeTypes);
+    }
+
+    protected static AbstractPlanNode followAssertedLeftChain(
+            AbstractPlanNode start,
+            boolean hasOptionalProjection,
+            PlanNodeType startType,
+            PlanNodeType... nodeTypes)
+    {
         AbstractPlanNode result = start;
         assertEquals(startType, result.getPlanNodeType());
-        for (PlanNodeType type : nodeTypes) {
+        for (int nodeNumber = 0; nodeNumber < nodeTypes.length; nodeNumber += 1) {
+            PlanNodeType type = nodeTypes[nodeNumber];
             assertTrue(result.getChildCount() > 0);
             result = result.getChild(0);
-            assertEquals(type, result.getPlanNodeType());
+            if (hasOptionalProjection
+                    && (nodeNumber == 0)
+                    && (result.getPlanNodeType() == PlanNodeType.PROJECTION)) {
+                nodeNumber -= 1;
+            } else {
+                assertEquals(type, result.getPlanNodeType());
+            }
         }
         return result;
     }
@@ -466,14 +517,14 @@ public class PlannerTestCase extends TestCase {
 
     /**
      * Assert that a two-fragment plan's coordinator fragment does a simple
-     * projection.
+     * projection.  Sometimes the projection is optimized away, and
+     * that's ok.
      **/
     protected static void assertProjectingCoordinator(
             List<AbstractPlanNode> lpn) {
         AbstractPlanNode pn;
         pn = lpn.get(0);
-        assertTopDownTree(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        assertTopDownTreeWithOptionalSelectProjection(pn, PlanNodeType.SEND,
                 PlanNodeType.RECEIVE);
     }
 
@@ -488,13 +539,14 @@ public class PlannerTestCase extends TestCase {
         NestLoopPlanNode nlj;
         SeqScanPlanNode seqScan;
         pn = lpn.get(0);
-        assertTopDownTree(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        assertTopDownTree(pn,
+                true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP,
                 PlanNodeType.SEQSCAN,
                 PlanNodeType.RECEIVE);
-        node = followAssertedLeftChain(pn, PlanNodeType.SEND,
-                PlanNodeType.PROJECTION,
+        node = followAssertedLeftChain(pn, true,
+                PlanNodeType.SEND,
                 PlanNodeType.NESTLOOP);
         nlj = (NestLoopPlanNode) node;
         assertEquals(JoinType.LEFT, nlj.getJoinType());
@@ -519,6 +571,12 @@ public class PlannerTestCase extends TestCase {
             System.out.printf("      Node type %s\n", root.getPlanNodeType());
             for (int idx = 1; idx < root.getChildCount(); idx += 1) {
                 System.out.printf("        Child %d: %s\n", idx, root.getChild(idx).getPlanNodeType());
+            }
+            for (Entry<PlanNodeType, AbstractPlanNode> entry : root.getInlinePlanNodes().entrySet()) {
+                System.out.printf("        Inline %s\n", entry.getKey());
+            }
+            for (Entry<PlanNodeType, AbstractPlanNode> entry : root.getInlinePlanNodes().entrySet()) {
+                System.out.printf("        Inline %s\n", entry.getKey());
             }
         }
     }
@@ -586,9 +644,22 @@ public class PlannerTestCase extends TestCase {
      **/
     protected static void assertTopDownTree(AbstractPlanNode start,
             PlanNodeType... nodeTypes) {
+        assertTopDownTree(start, false, nodeTypes);
+    }
+
+    protected static void assertTopDownTreeWithOptionalSelectProjection(AbstractPlanNode start,
+            PlanNodeType... nodeTypes) {
+        assertTopDownTree(start, true, nodeTypes);
+    }
+
+    protected static void assertTopDownTree(AbstractPlanNode start,
+                                            boolean hasOptionalProjection,
+                                            PlanNodeType ... nodeTypes) {
         Stack<AbstractPlanNode> stack = new Stack<>();
         stack.push(start);
-        for (PlanNodeType type : nodeTypes) {
+
+        for (int nodeNumber = 0; nodeNumber < nodeTypes.length; nodeNumber += 1) {
+            PlanNodeType type = nodeTypes[nodeNumber];
             // Process each node before its children or later siblings.
             AbstractPlanNode parent;
             try {
@@ -606,6 +677,21 @@ public class PlannerTestCase extends TestCase {
                         " with " + childCount + " direct children.");
                 continue;
             }
+            // If we have specified that this has an optional
+            // projection node, then we may find a projection
+            // node at node number 1.  This is from the select
+            // list projection, but we may have optimized it away.
+            if (nodeNumber == 1 && hasOptionalProjection) {
+                if (PlanNodeType.PROJECTION == parent.getPlanNodeType()) {
+                    assertEquals(1, parent.getChildCount());
+                    // We don't actually want to use up this
+                    // type from nodeTypes.  So undo the increment
+                    // we are about to do.
+                    nodeNumber -= 1;
+                    stack.push(parent.getChild(0));
+                    continue;
+                }
+            }
             assertEquals(type, parent.getPlanNodeType());
             // Iterate from the last child to the first.
             while (childCount > 0) {
@@ -619,74 +705,268 @@ public class PlannerTestCase extends TestCase {
                 stack.isEmpty());
     }
 
-    /**
-     * Validate a plan, ignoring inline nodes.  This is kind of like
-     * PlannerTestCase.compileToTopDownTree.  The differences are
-     * <ol>
-     *   <li>We only look out out-of-line nodes,</li>
-     *   <li>We can compile MP plans and SP plans, and</li>
-     *   <li>The boundaries between fragments in MP plans
-     *       are marked with PlanNodeType.INVALID.</li>
-     *   <li>We can describe inline nodes pretty easily.</li>
-     * </ol>
-     *
-     * See TestWindowFunctions.testWindowFunctionWithIndex for examples
-     * of the use of this function.
-     *
-     * @param SQL The statement text.
-     * @param numberOfFragments The number of expected fragments.
-     * @param types The plan node types of the inline and out-of-line nodes.
-     *              If types[idx] is a PlanNodeType, then the node should
-     *              have no inline children.  If types[idx] is an array of
-     *              PlanNodeType values then the node has the type types[idx][0],
-     *              and it should have types[idx][1..] as inline children.
-     */
-    protected void validatePlan(String SQL,
-                                int numberOfFragments,
-                                Object ...types) {
-        List<AbstractPlanNode> fragments = compileToFragments(SQL);
-        assertEquals(String.format("Expected %d fragments, not %d",
-                                   numberOfFragments,
-                                   fragments.size()),
-                     numberOfFragments,
-                     fragments.size());
-        int idx = 0;
-        int fragment = 1;
-        // The index of the last PlanNodeType in types.
-        int nchildren = types.length;
-        System.out.printf("Plan for <%s>\n", SQL);
-        for (AbstractPlanNode plan : fragments) {
-            printPlanNodes(plan, fragment, numberOfFragments);
-            // The boundaries between fragments are
-            // marked with PlanNodeType.INVALID.
-            if (fragment > 1) {
-                assertEquals("Expected a fragment to start here",
-                             PlanNodeType.INVALID,
-                             types[idx]);
-                idx += 1;
-            }
-            fragment += 1;
-            for (;plan != null; idx += 1) {
-                if (types.length <= idx) {
-                    fail(String.format("Expected %d plan nodes, but found more.", types.length));
-                }
-                if (types[idx] instanceof PlanNodeType) {
-                    assertEquals(types[idx], plan.getPlanNodeType());
-                } else if (types[idx] instanceof PlanNodeType[]) {
-                    PlanNodeType childTypes[] = (PlanNodeType[])(types[idx]);
-                    assertEquals(childTypes[0], plan.getPlanNodeType());
-                    for (int tidx = 1; tidx < childTypes.length; tidx += 1) {
-                        PlanNodeType childType = childTypes[tidx];
-                        assertTrue(String.format("Expected inline node of type %s", childType),
-                                   plan.getInlinePlanNode(childType) != null);
-                    }
-                } else {
-                    fail("Expected a PlanNodeType or an array of PlanNodeTypes here.");
-                }
-                plan = (plan.getChildCount() > 0) ? plan.getChild(0) : null;
-            }
-        }
-        assertEquals(nchildren, idx);
+    protected interface PlanMatcher {
+        String match(AbstractPlanNode node);
     }
 
+    protected static class PlanWithInlineNodes implements PlanMatcher {
+        PlanNodeType m_type = null;
+
+        List<PlanNodeType> m_branches = new ArrayList<>();
+        public PlanWithInlineNodes(PlanNodeType mainType, PlanNodeType ... nodes) {
+            m_type = mainType;
+            for (PlanNodeType node : nodes) {
+                m_branches.add(node);
+            }
+        }
+
+        @Override
+        public String match(AbstractPlanNode node) {
+            PlanNodeType mainNodeType = node.getPlanNodeType();
+            if (m_type != mainNodeType) {
+                return String.format("PlanWithInlineNode: expected main plan node type %s, got %s",
+                                     m_type, mainNodeType);
+            }
+            for (PlanNodeType nodeType : m_branches) {
+                AbstractPlanNode inlineNode = node.getInlinePlanNode(nodeType);
+                if (inlineNode == null) {
+                    return String.format("Expected inline node type %s but didn't find it.",
+                                         nodeType.name());
+                }
+            }
+            if (m_branches.size() != node.getInlinePlanNodes().size()) {
+                return String.format("Expected %d inline nodes, found %d", m_branches.size(), node.getInlinePlanNodes().size());
+            }
+            return null;
+        }
+    }
+
+    protected static PlanWithInlineNodes planWithInlineNodes(PlanNodeType mainType,
+                                                             PlanNodeType ... inlineTypes) {
+        return new PlanWithInlineNodes(mainType, inlineTypes);
+    }
+
+    /**
+     * Make a PlanMatcher out of an object.  The object
+     * really wants to be a PlanMatcher itself.  But it's
+     * very convenient to just allow a plan node type here,
+     * so we relax the type system.
+     *
+     * @param obj
+     * @return
+     */
+    private static PlanMatcher makePlanMatcher(Object obj) {
+        if (obj instanceof PlanNodeType) {
+            return (node) -> {
+                        PlanNodeType pnt = (PlanNodeType)obj;
+                        if (node.getPlanNodeType() != (PlanNodeType)obj) {
+                            return String.format("Expected Plan Node Type %s not %s",
+                                                 pnt.name(),
+                                                 node.getPlanNodeType().name());
+                        }
+                        return null;
+                    };
+        }
+        else if (obj instanceof PlanMatcher) {
+            return (PlanMatcher)obj;
+        }
+        else {
+            throw new PlanningErrorException("Bad fragment specification type.");
+        }
+    }
+
+    protected static class FragmentSpec implements PlanMatcher {
+        private List<PlanMatcher> m_nodeSpecs = new ArrayList<>();
+
+        public FragmentSpec(Object ... nodeSpecs) {
+            for (int idx = 0; idx < nodeSpecs.length; idx += 1) {
+                m_nodeSpecs.add(makePlanMatcher(nodeSpecs[idx]));
+            }
+        }
+
+        @Override
+        public String match(AbstractPlanNode node) {
+            for (PlanMatcher pm : m_nodeSpecs) {
+                if (node == null) {
+                    return "Expected more nodes in plan.";
+                }
+                String err = pm.match(node);
+                if (err != null) {
+                    return err;
+                }
+                if (node.getChildCount() > 0) {
+                    node = node.getChild(0);
+                }
+                else {
+                    node = null;
+                }
+            }
+            return null;
+        }
+    }
+
+    protected static FragmentSpec fragSpec(Object ... nodeSpecs) {
+        return new FragmentSpec(nodeSpecs);
+    }
+
+    protected static class SomeOrNoneOrAllOf implements PlanMatcher {
+        boolean m_needAll;
+        boolean m_needSome;
+        String m_failMessage;
+        List<PlanMatcher> m_allMatchers = new ArrayList<>();
+
+        /**
+         * Match some or none or all of a set of conditions.
+         * <ul>
+         *   <li>To match all conditions specify needAll true.</li>
+         *   <li>To match at least one condition specify needSome true and needAll false.</li>
+         *   <li>To match none of the conditions specify needSome and needAll to be both false.</li>
+         * </ul>
+         *
+         * @param needAll If this is true we need to match all conditions.  If
+         *                this is false then the semantics depends on needSome.
+         * @param needSome If this is true we need only match some conditions.
+         *                 If this and needAll are both false we need to fail
+         *                 all the conditions.
+         * @param failMessage The error message to return if we can't find
+         *                    anything better.
+         * @param matchers The conditions to match.  These can be either PlanNodeType
+         *                 enumerals or else PlanMatcher objects.  At least one
+         *                 matcher must be specified.
+         */
+        public SomeOrNoneOrAllOf(boolean needAll, boolean needSome, String failMessage, Object ...matchers) {
+            m_needAll = needAll;
+            m_needSome = needAll || needSome;
+            m_failMessage = failMessage;
+            if (matchers.length == 0) {
+                throw new PlanningErrorException("Need at least one matcher here.");
+            }
+            for (Object obj : matchers) {
+                m_allMatchers.add(makePlanMatcher(obj));
+            }
+        }
+
+        @Override
+        public String match(AbstractPlanNode node) {
+            for (PlanMatcher pm : m_allMatchers) {
+                String error = pm.match(node);
+                if (error != null) {
+                    if (m_needAll) {
+                        return error;
+                    }
+                }
+                else if (!m_needAll) {
+                    // We didn't get an error message and
+                    // we need some to be true but maybe not
+                    // all.  So return null, which is success.
+                    if (m_needSome) {
+                        return null;
+                    }
+                    else {
+                        // We got a successful match, but we didn't
+                        // want any.  So return the fallback message.
+                        return m_failMessage;
+                    }
+                }
+            }
+            if (m_needAll) {
+                // if m_needAll is true, then we never
+                // saw an error.  Otherwise we would have
+                // returned earlier.  So return null, which
+                // is success.
+                return null;
+            }
+            // If m_needAll is false and m_needSome is true
+            // then we must have seen nothing but failures.
+            // So this is a failure.
+            if (m_needSome) {
+                return m_failMessage;
+            }
+            else {
+                // If m_needAll and m_needSome are both
+                // false then we want to match no condition.
+                // But that's exactly what we have seen, so
+                // we want to return null, which is success.
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Match all the given node specifications.  Specifications
+     * after the first failure are not evaluated.
+     *
+     * @param nodeSpecs  The specifications.
+     * @return
+     */
+    protected PlanMatcher allOf(PlanMatcher ... nodeSpecs) {
+        return new SomeOrNoneOrAllOf(true, true, "ShouldNeverHappen", (Object[])nodeSpecs);
+    }
+    // This is like the above, but make some expressions more convenient.
+    protected PlanMatcher allOf(Object ... nodeSpecs) {
+        return new SomeOrNoneOrAllOf(true, true, "ShouldNeverHappen", nodeSpecs);
+    }
+
+    /**
+     * Match at least one of the given node specifications.  Only specifications
+     * up until the first success are evaluated.
+     *
+     * @param failMessage A message to return if no specification succeeds.
+     * @param nodeSpecs The specifications.
+     * @return
+     */
+    protected PlanMatcher someOf(String failMessage, PlanMatcher ... nodeSpecs) {
+        return new SomeOrNoneOrAllOf(false, true, failMessage, (Object[])nodeSpecs);
+    }
+    // This is like the above, but make some expressions more convenient.
+    protected PlanMatcher someOf(String failMessage, Object ... nodeSpecs) {
+        return new SomeOrNoneOrAllOf(false, true, failMessage, nodeSpecs);
+    }
+    /**
+     * Ensure that no specification succeeds.
+     *
+     * @param failMessage A message to return if some specification succeeds.
+     *                    We need this because success is denoted by a null error message.
+     * @param nodeSpecs The specifications.
+     * @return
+     */
+    protected PlanMatcher noneOf(String failMessage, PlanMatcher ... nodeSpecs) {
+        return new SomeOrNoneOrAllOf(false, false, failMessage, (Object[])nodeSpecs);
+    }
+    // This is like the above, but make some expressions more convenient.
+    protected PlanMatcher noneOf(String failMessage, Object ... nodeSpecs) {
+        return new SomeOrNoneOrAllOf(false, false, failMessage, nodeSpecs);
+    }
+    /**
+     * Validate a plan.  This is kind of like
+     * PlannerTestCase.compileToTopDownTree.  The differences are
+     * <ol>
+     *   <li>We can compile MP plans and SP plans</li>
+     *   <li>We can describe plan nodes with inline nodes
+     *       pretty handily.</li>
+     * </ol>
+     *
+     * See TestWindowFunctions.testWindowFunctionWithIndex or
+     * TestPlansInsertIntoSelect for examples of the use of this
+     * function.  TestUnion also has a function which uses this
+     * scheme.
+     *
+     * @param SQL The SQL statement text.
+     * @param types Specifications of the plans for the fragments.
+     *              These are most easily specified with the function
+     *              fragSpec.
+     */
+    protected void validatePlan(String SQL,
+                                FragmentSpec ... spec) {
+        List<AbstractPlanNode> fragments = compileToFragments(SQL);
+        assertEquals(String.format("Expected %d fragments, not %d",
+                                   spec.length,
+                                   fragments.size()),
+                     spec.length,
+                     fragments.size());
+        for (int idx = 0; idx < fragments.size(); idx += 1) {
+            String error = spec[idx].match(fragments.get(idx));
+            assertNull(error, error);
+        }
+    }
 }

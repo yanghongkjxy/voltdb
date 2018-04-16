@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -130,6 +130,39 @@ public class TestDDLFeatures extends AdhocDDLTestBase {
         assertEquals(vt1.getRowCount(), 1);
         assertEquals(vt1.getLong(0), 1);
         assertEquals(vt1.getString("NAME"), "Kevin Durant");
+    }
+
+    @Test
+    public void testCreateMultiStmtProcedureAsSQLStmt() throws Exception {
+        assertTrue(findTableInSystemCatalogResults("T26"));
+        assertTrue(isColumnPartitionColumn("T26", "age"));
+
+        ClientResponse resp;
+        VoltTable vt;
+
+        m_client.callProcedure("@AdHoc", "DELETE FROM T26;");
+        // multi partitioned query with 2 statements
+        resp = m_client.callProcedure("msp1", 19, 0);
+        vt = resp.getResults()[0];
+        assertEquals(vt.getRowCount(), 1);
+        vt = resp.getResults()[1];
+        vt.advanceToRow(0);
+        assertEquals(19l, vt.get(0, VoltType.BIGINT));
+        assertEquals((byte)0, vt.get(1, VoltType.TINYINT));
+
+        m_client.callProcedure("T26.insert", 19, 1);
+        m_client.callProcedure("T26.insert", 19, 0);
+        m_client.callProcedure("T26.insert", 20, 0);
+
+        // single partitioned query with 3 statements
+        resp = m_client.callProcedure("msp2", 0, 19, 20);
+        vt = resp.getResults()[0];
+        vt.advanceToRow(0);
+        assertEquals(2l, vt.get(0, VoltType.BIGINT));
+        vt = resp.getResults()[1];
+        assertEquals(vt.getRowCount(), 1);
+        vt = resp.getResults()[2];
+        assertEquals(vt.getRowCount(), 3);
     }
 
     @Test
@@ -290,7 +323,7 @@ public class TestDDLFeatures extends AdhocDDLTestBase {
 
         // Test for T22
         assertTrue(findTableInSystemCatalogResults("T22"));
-        assertEquals(8, indexedColumnCount("T22"));
+        assertEquals(10, indexedColumnCount("T22"));
 
         // Test for T23
         assertTrue(findTableInSystemCatalogResults("T23"));
@@ -350,8 +383,6 @@ public class TestDDLFeatures extends AdhocDDLTestBase {
     @Test
     public void testExportTable() throws Exception
     {
-        if (!MiscUtils.isPro()) { return; } // not supported in community
-
         assertTrue(findTableInSystemCatalogResults("T25"));
         assertEquals(getTableType("T25"), "EXPORT");
         //Export table created with STREAM syntax
@@ -362,8 +393,6 @@ public class TestDDLFeatures extends AdhocDDLTestBase {
     @Test
     public void testStreamView() throws Exception
     {
-        if (!MiscUtils.isPro()) { return; } // not supported in community
-
         assertTrue(findTableInSystemCatalogResults("T25N"));
         assertEquals(getTableType("T25N"), "EXPORT");
         assertEquals(getTableType("VT25N"), "VIEW");

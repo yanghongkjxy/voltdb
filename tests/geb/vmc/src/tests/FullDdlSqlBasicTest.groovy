@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -248,7 +248,7 @@ class FullDdlSqlBasicTest extends SqlQueriesTestBase {
         when: 'run the specified (DDL) SQL statement(s)'
         // For a really long set of (DDL) SQL statements, break them into
         // smaller groups of statements, then run each group individually
-        int maxNumStatementsPerGroup = 10
+        int maxNumStatementsPerGroup = 15
         if ((statement =~ ';').count > maxNumStatementsPerGroup) {
             int start = 0
             int semicolon = 0

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -26,16 +26,14 @@ package org.voltdb.regressionsuites;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 
-import junit.framework.Test;
-
 import org.voltdb.BackendTarget;
 import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
 import org.voltdb.client.ClientResponse;
 import org.voltdb.client.ProcedureCallback;
 import org.voltdb.compiler.VoltProjectBuilder;
-import org.voltdb.regressionsuites.TestStopNode.StopCallBack;
-import org.voltdb.utils.MiscUtils;
+
+import junit.framework.Test;
 
 public class TestStopNode2NK1PartitionDetectionOff extends RegressionSuite
 {
@@ -156,10 +154,6 @@ public class TestStopNode2NK1PartitionDetectionOff extends RegressionSuite
         VoltProjectBuilder project = getBuilderForTest();
         boolean success;
         //Lets tolerate 3 node failures.
-        if (!MiscUtils.isPro()) {
-            kfactor = 0;
-        }
-
         m_config = new LocalCluster("decimal-default.jar", 4, 2, kfactor, BackendTarget.NATIVE_EE_JNI);
         m_config.setHasLocalServer(true);
         success = m_config.compile(project);

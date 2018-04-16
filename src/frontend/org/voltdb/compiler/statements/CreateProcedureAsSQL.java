@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -20,6 +20,7 @@ package org.voltdb.compiler.statements;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
 
+import org.voltdb.ProcedurePartitionData;
 import org.voltdb.catalog.Database;
 import org.voltdb.compiler.DDLCompiler;
 import org.voltdb.compiler.DDLCompiler.DDLStatement;
@@ -37,10 +38,19 @@ public class CreateProcedureAsSQL extends CreateProcedure {
     @Override
     protected boolean processStatement(DDLStatement ddlStatement, Database db, DdlProceduresToLoad whichProcs)
             throws VoltCompilerException {
-        // Matches if it is CREATE PROCEDURE <proc-name> [ALLOW <role> ...] [PARTITION ON ...] AS <select-or-dml-statement>
-        Matcher statementMatcher = SQLParser.matchCreateProcedureAsSQL(ddlStatement.statement);
+
+        /* first check if it matches a multi statement procedure
+         * if not, then check if it is a single statement procedure
+         */
+        // Matches if it is CREATE PROCEDURE <proc-name> [ALLOW <role> ...] [PARTITION ON ...] AS BEGIN <select-or-dml-statement>
+        Matcher statementMatcher = SQLParser.matchCreateMultiStmtProcedureAsSQL(ddlStatement.statement);
+
         if (! statementMatcher.matches()) {
-            return false;
+         // Matches if it is CREATE PROCEDURE <proc-name> [ALLOW <role> ...] [PARTITION ON ...] AS <select-or-dml-statement>
+            statementMatcher = SQLParser.matchCreateProcedureAsSQL(ddlStatement.statement);
+            if (! statementMatcher.matches()) {
+                return false;
+            }
         }
         String clazz = checkProcedureIdentifier(statementMatcher.group(1), ddlStatement.statement);
         String sqlStatement = statementMatcher.group(3) + ";";
@@ -50,7 +60,7 @@ public class CreateProcedureAsSQL extends CreateProcedure {
 
         // Parse the ALLOW and PARTITION clauses.
         // Populate descriptor roles and returned partition data as needed.
-        CreateProcedurePartitionData partitionData =
+        ProcedurePartitionData partitionData =
                 parseCreateProcedureClauses(descriptor, statementMatcher.group(2));
 
         m_tracker.add(descriptor);

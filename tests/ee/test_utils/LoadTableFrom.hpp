@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -70,7 +70,7 @@ namespace voltdb {
  */
 TempTable *loadTableFrom(ReferenceSerializeInputBE& result, bool skipMsgHeader = false)
 {
-    // These varaibles are only used if
+    // These variables are only used if
     // VOLT_TRACE is defined.  But their
     // values need to be calculated, because the
     // calculations have side effects.  If we
@@ -124,8 +124,7 @@ TempTable *loadTableFrom(ReferenceSerializeInputBE& result, bool skipMsgHeader =
                     columnNames[idx].c_str());
     }
     TempTable *table;
-    table = TableFactory::getTempTable(0,
-                                       "result",
+    table = TableFactory::buildTempTable("result",
                                        schema, // Transfers ownership to the table.
                                        columnNames,
                                        NULL);

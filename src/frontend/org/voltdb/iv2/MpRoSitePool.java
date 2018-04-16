@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -18,17 +18,18 @@
 package org.voltdb.iv2;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadFactory;
-
 import org.voltcore.logging.VoltLogger;
 import org.voltcore.utils.CoreUtils;
 import org.voltdb.BackendTarget;
 import org.voltdb.CatalogContext;
-import org.voltdb.CatalogSpecificPlanner;
 import org.voltdb.LoadedProcedureSet;
 import org.voltdb.StarvationTracker;
 
@@ -52,16 +53,17 @@ class MpRoSitePool {
 
         MpRoSiteContext(long siteId, BackendTarget backend,
                 CatalogContext context, int partitionId,
-                InitiatorMailbox initiatorMailbox, CatalogSpecificPlanner csp,
+                InitiatorMailbox initiatorMailbox,
                 ThreadFactory threadFactory)
         {
             m_catalogContext = context;
-            m_queue = new SiteTaskerQueue();
+            m_queue = new SiteTaskerQueue(partitionId);
             // IZZY: Just need something non-null for now
             m_queue.setStarvationTracker(new StarvationTracker(siteId));
+            m_queue.setupQueueDepthTracker(siteId);
             m_site = new MpRoSite(m_queue, siteId, backend, m_catalogContext, partitionId);
             m_loadedProcedures = new LoadedProcedureSet(m_site);
-            m_loadedProcedures.loadProcedures(m_catalogContext, csp);
+            m_loadedProcedures.loadProcedures(m_catalogContext);
             m_site.setLoadedProcedures(m_loadedProcedures);
             m_siteThread = threadFactory.newThread(m_site);
             m_siteThread.start();
@@ -94,9 +96,12 @@ class MpRoSitePool {
     }
 
     // Stack of idle MpRoSites
-    private Deque<MpRoSiteContext> m_idleSites = new ArrayDeque<MpRoSiteContext>();
+    private Deque<MpRoSiteContext> m_idleSites = new ArrayDeque<>();
     // Active sites, hashed by the txnID they're working on
-    private Map<Long, MpRoSiteContext> m_busySites = new HashMap<Long, MpRoSiteContext>();
+    private Map<Long, MpRoSiteContext> m_busySites = new HashMap<>();
+
+    //The reference for all sites, used for shutdown
+    private List<MpRoSiteContext> m_allSites = Collections.synchronizedList(new ArrayList<>());
 
     // Stuff we need to construct new MpRoSites
     private final long m_siteId;
@@ -104,24 +109,22 @@ class MpRoSitePool {
     private final int m_partitionId;
     private final InitiatorMailbox m_initiatorMailbox;
     private CatalogContext m_catalogContext;
-    private CatalogSpecificPlanner m_csp;
     private ThreadFactory m_poolThreadFactory;
     private final int m_poolSize;
+    private volatile boolean m_shuttingDown = false;
 
     MpRoSitePool(
             long siteId,
             BackendTarget backend,
             CatalogContext context,
             int partitionId,
-            InitiatorMailbox initiatorMailbox,
-            CatalogSpecificPlanner csp)
+            InitiatorMailbox initiatorMailbox)
     {
         m_siteId = siteId;
         m_backend = backend;
         m_catalogContext = context;
         m_partitionId = partitionId;
         m_initiatorMailbox = initiatorMailbox;
-        m_csp = csp;
         m_poolThreadFactory =
             CoreUtils.getThreadFactory("RO MP Site - " + CoreUtils.hsIdToString(m_siteId),
                     CoreUtils.MEDIUM_STACK_SIZE);
@@ -135,24 +138,27 @@ class MpRoSitePool {
 
         // Construct the initial pool
         for (int i = 0; i < INITIAL_POOL_SIZE; i++) {
-            m_idleSites.push(new MpRoSiteContext(m_siteId,
-                        m_backend,
-                        m_catalogContext,
-                        m_partitionId,
-                        m_initiatorMailbox,
-                        m_csp,
-                        m_poolThreadFactory));
+            MpRoSiteContext site = new MpRoSiteContext(m_siteId,
+                    m_backend,
+                    m_catalogContext,
+                    m_partitionId,
+                    m_initiatorMailbox,
+                    m_poolThreadFactory);
+            m_idleSites.push(site);
+            m_allSites.add(site);
         }
-
     }
 
     /**
      * Update the catalog
      */
-    void updateCatalog(String diffCmds, CatalogContext context, CatalogSpecificPlanner csp)
+    void updateCatalog(String diffCmds, CatalogContext context)
     {
+        if (m_shuttingDown) {
+            return;
+        }
+
         m_catalogContext = context;
-        m_csp = csp;
         // Wipe out all the idle sites with stale catalogs.
         // Non-idle sites will get killed and replaced when they finish
         // whatever they started before the catalog update
@@ -163,6 +169,7 @@ class MpRoSitePool {
                     || site.getCatalogVersion() != m_catalogContext.catalogVersion) {
                 site.shutdown();
                 m_idleSites.remove(site);
+                m_allSites.remove(site);
             }
         }
     }
@@ -170,10 +177,9 @@ class MpRoSitePool {
     /**
      * update cluster settings
      */
-    void updateSettings(CatalogContext context, CatalogSpecificPlanner csp)
+    void updateSettings(CatalogContext context)
     {
         m_catalogContext = context;
-        m_csp = csp;
     }
 
     /**
@@ -198,8 +204,11 @@ class MpRoSitePool {
      */
     boolean canAcceptWork()
     {
-        boolean retval = (!m_idleSites.isEmpty() || m_busySites.size() < m_poolSize);
-        return retval;
+        //lock down the pool and accept no more work upon shutting down.
+        if (m_shuttingDown) {
+            return false;
+        }
+        return (!m_idleSites.isEmpty() || m_busySites.size() < m_poolSize);
     }
 
     /**
@@ -219,13 +228,14 @@ class MpRoSitePool {
         }
         else {
             if (m_idleSites.isEmpty()) {
-                m_idleSites.push(new MpRoSiteContext(m_siteId,
-                            m_backend,
-                            m_catalogContext,
-                            m_partitionId,
-                            m_initiatorMailbox,
-                            m_csp,
-                            m_poolThreadFactory));
+                MpRoSiteContext newSite = new MpRoSiteContext(m_siteId,
+                        m_backend,
+                        m_catalogContext,
+                        m_partitionId,
+                        m_initiatorMailbox,
+                        m_poolThreadFactory);
+                m_idleSites.push(newSite);
+                m_allSites.add(newSite);
             }
             site = m_idleSites.pop();
             m_busySites.put(txnId, site);
@@ -239,6 +249,10 @@ class MpRoSitePool {
      */
     void completeWork(long txnId)
     {
+        if (m_shuttingDown) {
+            return;
+        }
+
         MpRoSiteContext site = m_busySites.remove(txnId);
         if (site == null) {
             throw new RuntimeException("No busy site for txnID: " + txnId + " found, shouldn't happen.");
@@ -252,23 +266,23 @@ class MpRoSitePool {
         }
         else {
             site.shutdown();
+            m_allSites.remove(site);
         }
     }
 
     void shutdown()
     {
+        m_shuttingDown = true;
+
         // Shutdown all, then join all, hopefully save some shutdown time for tests.
-        for (MpRoSiteContext site : m_idleSites) {
-            site.shutdown();
-        }
-        for (MpRoSiteContext site : m_busySites.values()) {
-            site.shutdown();
-        }
-        for (MpRoSiteContext site : m_idleSites) {
-            site.joinThread();
-        }
-        for (MpRoSiteContext site : m_busySites.values()) {
-            site.joinThread();
+        synchronized(m_allSites) {
+            for (MpRoSiteContext site : m_allSites) {
+                site.shutdown();
+            }
+
+            for (MpRoSiteContext site : m_allSites) {
+                site.joinThread();
+            }
         }
     }
 }

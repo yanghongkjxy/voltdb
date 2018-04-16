@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -119,6 +119,31 @@ public class TestFunctions extends PlannerTestCase {
         errorMsg = "user lacks privilege or object not found";
         failToCompile("select BIT_SHIFT_LEFT(BIGINT_TYPE)from bit", errorMsg);
         failToCompile("select BIT_SHIFT_RIGHT(BIGINT_TYPE)from bit", errorMsg);
+
+    }
+
+    public void testUnsupportedFuncs() {
+
+        failToCompile("SELECT  ACOS(FLOAT_TYPE) FROM NUMERICFUN",
+                "Function 'acos' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  ASIN(FLOAT_TYPE) FROM NUMERICFUN",
+                "Function 'asin' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  ATAN(FLOAT_TYPE) FROM NUMERICFUN",
+                "Function 'atan' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  SIGN(FLOAT_TYPE) FROM NUMERICFUN",
+                "Function 'sign' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  ROUNDMAGIC(FLOAT_TYPE) FROM NUMERICFUN",
+                "Function 'roundmagic' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  SOUNDEX(VARCHAR_TYPE) FROM NUMERICFUN",
+                "Function 'soundex' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  ASCII(VARCHAR_TYPE) FROM NUMERICFUN",
+                "Function 'ascii' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  RAWTOHEX(VARBINARY_TYPE) FROM NUMERICFUN",
+                "Function 'rawtohex' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  HEXTORAW(VARCHAR_TYPE) FROM NUMERICFUN",
+                "Function 'hextoraw' is not supported in VoltDB: Custom Function");
+        failToCompile("SELECT  ATAN2(FLOAT_TYPE,FLOAT_TYPE) FROM NUMERICFUN",
+                "user lacks privilege or object not found: ATAN2");
 
     }
 

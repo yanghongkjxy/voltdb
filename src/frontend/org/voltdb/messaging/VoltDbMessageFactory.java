@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -51,6 +51,8 @@ public class VoltDbMessageFactory extends VoltMessageFactory
     final public static byte DR2_MULTIPART_RESPONSE_ID = VOLTCORE_MESSAGE_ID_MAX + 25;
     final public static byte DUMMY_TRANSACTION_TASK_ID = VOLTCORE_MESSAGE_ID_MAX + 26;
     final public static byte DUMMY_TRANSACTION_RESPONSE_ID = VOLTCORE_MESSAGE_ID_MAX + 27;
+    final public static byte DUMP_PLAN_ID = VOLTCORE_MESSAGE_ID_MAX + 28;
+    final public static byte Migrate_Partition_Leader_MESSAGE_ID = VOLTCORE_MESSAGE_ID_MAX + 29;
 
     /**
      * Overridden by subclasses to create message types unknown by voltcore
@@ -144,6 +146,12 @@ public class VoltDbMessageFactory extends VoltMessageFactory
             break;
         case DUMMY_TRANSACTION_RESPONSE_ID:
             message = new DummyTransactionResponseMessage();
+            break;
+        case Migrate_Partition_Leader_MESSAGE_ID:
+            message = new MigratePartitionLeaderMessage();
+            break;
+        case DUMP_PLAN_ID:
+            message = new DumpPlanThenExitMessage();
             break;
         default:
             message = null;

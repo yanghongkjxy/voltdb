@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -186,6 +186,11 @@ public class DRRoleStats extends StatsSource {
 
             final State state = State.valueOf(stats.getString(CN_STATE));
             states.put(clusterId, state.and(states.get(clusterId)));
+        }
+
+        // Remove the -1 placeholder if there are real cluster states
+        if (states.size() > 1) {
+            states.remove((byte) -1);
         }
 
         assert role != null;

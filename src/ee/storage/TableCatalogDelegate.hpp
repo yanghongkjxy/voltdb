@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -36,11 +36,21 @@ class ExecutorContext;
 class TupleSchema;
 struct TableIndexScheme;
 class DRTupleStream;
+class VoltDBEngine;
 
 // There might be a better place for this, but current callers happen to have this header in common.
 template<typename K, typename V> V findInMapOrNull(const K& key, std::map<K, V> const &the_map)
 {
     typename std::map<K, V>::const_iterator lookup = the_map.find(key);
+    if (lookup != the_map.end()) {
+        return lookup->second;
+    }
+    return (V)NULL;
+}
+
+template<typename K, typename V> V findInMapOrNull(const K& key, std::unordered_map<K, V> const &the_map)
+{
+    typename std::unordered_map<K, V>::const_iterator lookup = the_map.find(key);
     if (lookup != the_map.end()) {
         return lookup->second;
     }
@@ -53,11 +63,12 @@ template<typename K, typename V> V findInMapOrNull(const K& key, std::map<K, V> 
 
 class TableCatalogDelegate {
   public:
-    TableCatalogDelegate(const std::string& signature, int32_t compactionThreshold)
+    TableCatalogDelegate(const std::string& signature, int32_t compactionThreshold, VoltDBEngine* engine)
         : m_table(NULL)
         , m_exportEnabled(false)
         , m_signature(signature)
         , m_compactionThreshold(compactionThreshold)
+//        , m_engine(engine)
     {}
 
     ~TableCatalogDelegate();
@@ -135,7 +146,11 @@ class TableCatalogDelegate {
     Table *constructTableFromCatalog(catalog::Database const &catalogDatabase,
                                      catalog::Table const &catalogTable,
                                      bool isXDCR,
-                                     int tableAllocationTargetSize = 0);
+                                     int tableAllocationTargetSize = 0,
+                                     /* indicates whether the constructed table should inherit isDRed attributed from
+                                      * the provided catalog table or set isDRed to false forcefully. Currently, only
+                                      * delta tables for joins in materialized views use the second option */
+                                     bool forceNoDR = false);
 
     voltdb::Table *m_table;
     bool m_exportEnabled;
@@ -143,6 +158,7 @@ class TableCatalogDelegate {
     const std::string m_signature;
     const int32_t m_compactionThreshold;
     char m_signatureHash[20];
+//    voltdb::VoltDBEngine *m_engine;
 };
 
 }

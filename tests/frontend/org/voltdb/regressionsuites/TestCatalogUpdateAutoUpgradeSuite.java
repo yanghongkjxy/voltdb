@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -29,9 +29,8 @@ import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import junit.framework.Test;
-
 import org.voltdb.BackendTarget;
+import org.voltdb.ProcedurePartitionData;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.VoltTable;
 import org.voltdb.benchmark.tpcc.TPCCProjectBuilder;
@@ -43,6 +42,8 @@ import org.voltdb.client.ProcedureCallback;
 import org.voltdb.compiler.CatalogUpgradeTools;
 import org.voltdb.utils.MiscUtils;
 
+import junit.framework.Test;
+
 /**
  * Tests catalog update with auto-upgrade.
  */
@@ -51,11 +52,6 @@ public class TestCatalogUpdateAutoUpgradeSuite extends RegressionSuite {
     static final int SITES_PER_HOST = 2;
     static final int HOSTS = 2;
     static final int K = 0;
-
-    // procedures used by these tests
-    static Class<?>[] BASEPROCS = { org.voltdb.benchmark.tpcc.procedures.InsertNewOrder.class,
-                                    org.voltdb.benchmark.tpcc.procedures.SelectAll.class,
-                                    org.voltdb.benchmark.tpcc.procedures.delivery.class };
 
     private static String upgradeCatalogBasePath;
     private static String upgradeCatalogXMLPath;
@@ -232,10 +228,14 @@ public class TestCatalogUpdateAutoUpgradeSuite extends RegressionSuite {
 
         TPCCProjectBuilder project = new TPCCProjectBuilder();
         project.addDefaultSchema();
-        // Add an import of an exact class match here to trigger ENG-6611 on auto-catalog-recompile
-        project.addLiteralSchema("import class org.voltdb_testprocs.fullddlfeatures.NoMeaningClass;");
         project.addDefaultPartitioning();
-        project.addProcedures(BASEPROCS);
+
+        project.addProcedure(org.voltdb.benchmark.tpcc.procedures.InsertNewOrder.class,
+                new ProcedurePartitionData("NEW_ORDER", "NO_W_ID", "2"));
+        project.addProcedure(org.voltdb.benchmark.tpcc.procedures.SelectAll.class);
+        project.addProcedure(org.voltdb.benchmark.tpcc.procedures.delivery.class,
+                new ProcedurePartitionData("WAREHOUSE", "W_ID"));
+
         upgradeCatalogBasePath = Configuration.getPathToCatalogForTest("catalogupdate-for-upgrade");
         upgradeCatalogXMLPath = upgradeCatalogBasePath + ".xml";
         upgradeCatalogJarPath = upgradeCatalogBasePath + ".jar";

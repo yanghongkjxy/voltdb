@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -38,7 +38,6 @@ import org.voltdb.SnapshotSiteProcessor;
 import org.voltdb.SnapshotTableTask;
 import org.voltdb.SystemProcedureExecutionContext;
 import org.voltdb.TheHashinator;
-import org.voltdb.TheHashinator.HashinatorType;
 import org.voltdb.VoltDB;
 import org.voltdb.VoltTable;
 import org.voltdb.catalog.Table;
@@ -93,7 +92,7 @@ public class NativeSnapshotWritePlan extends SnapshotWritePlan
     {
         assert(SnapshotSiteProcessor.ExecutionSitesCurrentlySnapshotting.isEmpty());
 
-        if (TheHashinator.getConfiguredHashinatorType() == HashinatorType.ELASTIC && hashinatorData == null) {
+        if (hashinatorData == null) {
             throw new RuntimeException("No hashinator data provided for elastic hashinator type.");
         }
 
@@ -126,7 +125,7 @@ public class NativeSnapshotWritePlan extends SnapshotWritePlan
                             null,
                             false);
 
-            SNAP_LOG.debug("ADDING TASK: " + task);
+            SNAP_LOG.debug("ADDING TASK for nativeSnapshot: " + task);
 
             if (table.getIsreplicated()) {
                 replicatedSnapshotTasks.add(task);
@@ -192,7 +191,8 @@ public class NativeSnapshotWritePlan extends SnapshotWritePlan
                         hashinatorData,
                         timestamp,
                         newPartitionCount,
-                        tables);
+                        tables,
+                        isTruncationSnapshot);
 
                 for (SnapshotTableTask task : replicatedSnapshotTasks) {
                     SnapshotDataTarget target = getSnapshotDataTarget(numTables, task);
@@ -308,7 +308,8 @@ public class NativeSnapshotWritePlan extends SnapshotWritePlan
             ExtensibleSnapshotDigestData extraSnapshotData,
             HashinatorSnapshotData hashinatorData,
             long timestamp, int newPartitionCount,
-            Table[] tables) throws IOException
+            Table[] tables,
+            boolean isTruncationSnapshot) throws IOException
     {
         InstanceId instId = VoltDB.instance().getHostMessenger().getInstanceId();
         Runnable completionTask = SnapshotUtil.writeSnapshotDigest(
@@ -324,22 +325,23 @@ public class NativeSnapshotWritePlan extends SnapshotWritePlan
                 instId,
                 timestamp,
                 newPartitionCount,
-                context.getClusterId());
+                context.getClusterId(),
+                isTruncationSnapshot);
         if (completionTask != null) {
             SnapshotSiteProcessor.m_tasksOnSnapshotCompletion.offer(completionTask);
         }
         if (hashinatorData != null) {
             completionTask = SnapshotUtil.writeHashinatorConfig(
-                    instId, file_path, file_nonce, context.getHostId(), hashinatorData);
+                    instId, file_path, file_nonce, context.getHostId(), hashinatorData, isTruncationSnapshot);
             if (completionTask != null) {
                 SnapshotSiteProcessor.m_tasksOnSnapshotCompletion.offer(completionTask);
             }
         }
-        completionTask = SnapshotUtil.writeSnapshotCatalog(file_path, file_nonce);
+        completionTask = SnapshotUtil.writeSnapshotCatalog(file_path, file_nonce, isTruncationSnapshot);
         if (completionTask != null) {
             SnapshotSiteProcessor.m_tasksOnSnapshotCompletion.offer(completionTask);
         }
-        completionTask = SnapshotUtil.writeSnapshotCompletion(file_path, file_nonce, context.getHostId(), SNAP_LOG);
+        completionTask = SnapshotUtil.writeSnapshotCompletion(file_path, file_nonce, context.getHostId(), SNAP_LOG, isTruncationSnapshot);
         if (completionTask != null) {
             SnapshotSiteProcessor.m_tasksOnSnapshotCompletion.offer(completionTask);
         }

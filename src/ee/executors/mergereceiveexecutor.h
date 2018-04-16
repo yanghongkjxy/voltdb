@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -57,7 +57,7 @@
 
 namespace voltdb {
 
-    class TempTable;
+    class AbstractTempTable;
     class OrderByPlanNode;
     class LimitPlanNode;
     class AggregateExecutorBase;
@@ -80,11 +80,11 @@ namespace voltdb {
                                AbstractExecutor::TupleComparer comp,
                                CountingPostfilter& postfilter,
                                AggregateExecutorBase* agg_exec,
-                               TempTable* output_table,
+                               AbstractTempTable* output_table,
                                ProgressMonitorProxy* pmp);
     protected:
         bool p_init(AbstractPlanNode* abstract_node,
-                    TempTableLimits* limits);
+                    const ExecutorVector& executorVector);
         bool p_execute(const NValueArray &params);
 
     private:
@@ -92,8 +92,6 @@ namespace voltdb {
         LimitPlanNode* m_limit_node;
 
         AggregateExecutorBase* m_agg_exec;
-
-        boost::scoped_ptr<TempTable> m_tmpInputTable;
     };
 
 }

@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -15,11 +15,13 @@
  * along with VoltDB.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "types.h"
-#include "common/debuglog.h"
-#include "common/ValueFactory.hpp"
-#include "common/FatalException.hpp"
 #include <string>
+
+#include "types.h"
+
+#include "common/FatalException.hpp"
+#include "common/Pool.hpp"
+#include "common/ValueFactory.hpp"
 
 namespace voltdb {
 using namespace std;
@@ -84,63 +86,6 @@ bool isVariableLengthType(ValueType type) {
     default:
         return false;
     }
-}
-
-
-NValue getRandomValue(ValueType type, uint32_t maxLength) {
-    switch (type) {
-        case VALUE_TYPE_TIMESTAMP:
-            return ValueFactory::getTimestampValue(static_cast<int64_t>(time(NULL)));
-        case VALUE_TYPE_TINYINT:
-            return ValueFactory::getTinyIntValue(static_cast<int8_t>(rand() % 128));
-        case VALUE_TYPE_SMALLINT:
-            return ValueFactory::getSmallIntValue(static_cast<int16_t>(rand() % 32768));
-        case VALUE_TYPE_INTEGER:
-            return ValueFactory::getIntegerValue(rand() % (1 << 31));
-        case VALUE_TYPE_BIGINT:
-            return ValueFactory::getBigIntValue(rand());
-        case VALUE_TYPE_DECIMAL: {
-            char characters[29];
-            int i;
-            for (i = 0; i < 15; ++i) {
-                characters[i] = (char)(48 + (rand() % 10));
-            }
-            characters[i] = '.';
-            for (i = 16; i < 28; ++i) {
-                characters[i] = (char)(48 + (rand() % 10));
-            }
-            characters[i] = '\0';
-            return ValueFactory::getDecimalValueFromString(string(characters));
-        }
-        case VALUE_TYPE_DOUBLE:
-            return ValueFactory::getDoubleValue((rand() % 10000) / (double)(rand() % 10000));
-        case VALUE_TYPE_VARCHAR: {
-            int length = (rand() % maxLength);
-            char characters[maxLength];
-            for (int ii = 0; ii < length; ii++) {
-                characters[ii] = (char)(32 + (rand() % 94)); //printable characters
-            }
-            characters[length] = '\0';
-            //printf("Characters are \"%s\"\n", characters);
-            return ValueFactory::getStringValue(string(characters));
-        }
-        case VALUE_TYPE_VARBINARY: {
-            int length = (rand() % maxLength);
-            unsigned char bytes[maxLength];
-            for (int ii = 0; ii < length; ii++) {
-                bytes[ii] = static_cast<unsigned char> (rand() % 256); //printable characters
-            }
-            bytes[length] = '\0';
-            //printf("Characters are \"%s\"\n", characters);
-            return ValueFactory::getBinaryValue(bytes, length);
-        }
-            break;
-        case VALUE_TYPE_ARRAY:
-        default: {
-            throwFatalException("Attempted to get a random value of unsupported value type %d", type);
-        }
-    }
-    throw exception();
 }
 
 string getTypeName(ValueType type) {
@@ -460,6 +405,9 @@ string planNodeToString(PlanNodeType type)
     case PLAN_NODE_TYPE_WINDOWFUNCTION: {
         return "WINDOWFUNCTION";
     }
+    case PLAN_NODE_TYPE_COMMONTABLE: {
+        return "COMMONTABLE";
+    }
     } // END OF SWITCH
     return "UNDEFINED";
 }
@@ -516,7 +464,10 @@ PlanNodeType stringToPlanNode(string str )
         return PLAN_NODE_TYPE_TUPLESCAN;
     } else if (str == "WINDOWFUNCTION") {
         return PLAN_NODE_TYPE_WINDOWFUNCTION;
+    } else if (str == "COMMONTABLE") {
+        return PLAN_NODE_TYPE_COMMONTABLE;
     }
+
     return PLAN_NODE_TYPE_INVALID;
 }
 
@@ -555,6 +506,9 @@ string expressionToString(ExpressionType type)
     }
     case EXPRESSION_TYPE_OPERATOR_EXISTS: {
         return "OPERATOR_EXISTS";
+    }
+    case EXPRESSION_TYPE_OPERATOR_UNARY_MINUS: {
+        return "OPERATOR_UNARY_MINUS";
     }
     case EXPRESSION_TYPE_COMPARE_EQUAL: {
         return "COMPARE_EQUAL";
@@ -699,6 +653,8 @@ ExpressionType stringToExpression(string str )
         return EXPRESSION_TYPE_OPERATOR_NOT;
     } else if (str == "OPERATOR_IS_NULL") {
         return EXPRESSION_TYPE_OPERATOR_IS_NULL;
+    } else if (str == "OPERATOR_UNARY_MINUS") {
+        return EXPRESSION_TYPE_OPERATOR_UNARY_MINUS;
     } else if (str == "OPERATOR_EXISTS") {
         return EXPRESSION_TYPE_OPERATOR_EXISTS;
     } else if (str == "COMPARE_EQUAL") {
@@ -777,6 +733,8 @@ ExpressionType stringToExpression(string str )
         return EXPRESSION_TYPE_OPERATOR_ALTERNATIVE;
     } else if (str == "ROW_SUBQUERY") {
         return EXPRESSION_TYPE_ROW_SUBQUERY;
+    } else if (str == "SELECT_SUBQUERY") {
+        return EXPRESSION_TYPE_SELECT_SUBQUERY;
     } else if (str == "SELECT_SUBQUERY") {
         return EXPRESSION_TYPE_SELECT_SUBQUERY;
     }

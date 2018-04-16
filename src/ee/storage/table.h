@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -47,6 +47,7 @@
 #define HSTORETABLE_H
 
 #include "common/ids.h"
+#include "common/LargeTempTableBlockId.hpp"
 #include "common/types.h"
 #include "common/TupleSchema.h"
 #include "common/Pool.hpp"
@@ -77,6 +78,7 @@ const size_t COLUMN_DESCRIPTOR_SIZE = 1 + 4 + 4; // type, name offset, name leng
 class Table {
     friend class TableFactory;
     friend class TableIterator;
+    friend class LargeTempTableIterator;
     friend class TableTupleFilter;
     friend class CopyOnWriteContext;
     friend class ExecutionEngine;
@@ -114,8 +116,8 @@ class Table {
     // ------------------------------------------------------------------
     // ACCESS METHODS
     // ------------------------------------------------------------------
-    virtual TableIterator& iterator() = 0;
-    virtual TableIterator& iteratorDeletingAsWeGo() = 0;
+    virtual TableIterator iterator() = 0;
+    virtual TableIterator iteratorDeletingAsWeGo() = 0;
 
     // ------------------------------------------------------------------
     // OPERATIONS
@@ -132,6 +134,11 @@ class Table {
 
     TableTuple& tempTuple() {
         assert (m_tempTuple.m_data);
+        m_tempTuple.resetHeader();
+        m_tempTuple.setActiveTrue();
+        // Temp tuples are typically re-used so their data can change frequently.
+        // Mark inlined, variable-length data as volatile.
+        m_tempTuple.setInlinedDataIsVolatileTrue();
         return m_tempTuple;
     }
 
@@ -176,7 +183,14 @@ class Table {
 
     virtual std::string tableType() const = 0;
 
-    virtual std::string debug();
+    // Return a string containing info about this table
+    std::string debug() const {
+        return debug("");
+    }
+
+    // Return a string containing info about this table
+    // (each line prefixed by the given string)
+    virtual std::string debug(const std::string &spacer) const;
 
     // ------------------------------------------------------------------
     // SERIALIZATION
@@ -201,18 +215,24 @@ class Table {
      * Used for recovery where the schema is not sent.
      */
     void loadTuplesFromNoHeader(SerializeInputBE& serialInput,
-                                Pool* stringPool = NULL,
-                                ReferenceSerializeOutput* uniqueViolationOutput = NULL,
-                                bool shouldDRStreamRows = false);
+                                Pool* stringPool = NULL);
 
     /**
      * Loads only tuple data, not schema, from the serialized table.
      * Used for initial data loading and receiving dependencies.
      */
     void loadTuplesFrom(SerializeInputBE& serialInput,
+                        Pool* stringPool = NULL);
+
+    /**
+     * Loads tuple data from the serialized table.
+     * Used for snapshot restore and bulkLoad
+     */
+    void loadTuplesForLoadTable(SerializeInputBE& serialInput,
                         Pool* stringPool = NULL,
                         ReferenceSerializeOutput* uniqueViolationOutput = NULL,
-                        bool shouldDRStreamRows = false);
+                        bool shouldDRStreamRows = false,
+                        bool ignoreTupleLimit = true);
 
 
     // ------------------------------------------------------------------
@@ -287,7 +307,8 @@ protected:
                                     ReferenceSerializeOutput* uniqueViolationOutput,
                                     int32_t& serializedTupleCount,
                                     size_t& tupleCountPosition,
-                                    bool shouldDRStreamRow) { }
+                                    bool shouldDRStreamRow = false,
+                                    bool ignoreTupleLimit = true) { }
 
     virtual void swapTuples(TableTuple& sourceTupleWithNewValues, TableTuple& destinationTuple) {
         throwFatalException("Unsupported operation");
@@ -301,9 +322,15 @@ public:
 protected:
     // virtual block management functions
     virtual void nextFreeTuple(TableTuple* tuple) = 0;
-    virtual void freeLastScanedBlock(std::vector<TBPtr>::iterator nextBlockIterator) {
+    virtual void freeLastScannedBlock(std::vector<TBPtr>::iterator nextBlockIterator) {
         throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
-                                     "May not use freeLastScanedBlock with streamed tables or persistent tables.");
+                                     "May only use freeLastScannedBlock with instances of TempTable.");
+    }
+
+    // Used by delete-as-you-go iterators.  Returns an iterator to the block id of the next block.
+    virtual std::vector<LargeTempTableBlockId>::iterator releaseBlock(std::vector<LargeTempTableBlockId>::iterator it) {
+        throw SerializableEEException(VOLT_EE_EXCEPTION_TYPE_EEEXCEPTION,
+                                     "May only use releaseBlock with instances of LargeTempTable.");
     }
 
     // Return tuple blocks addresses
@@ -331,6 +358,7 @@ protected:
                                        std::vector<std::string> const& columnNames,
                                        bool ownsTupleSchema,
                                        int32_t compactionThreshold = 95);
+    bool checkNulls(TableTuple& tuple) const;
 
 protected:
     // ------------------------------------------------------------------
@@ -340,6 +368,9 @@ protected:
     boost::scoped_array<char> m_tempTupleMemory;
 
     TupleSchema* m_schema;
+
+    // CONSTRAINTS
+    std::vector<bool> m_allowNulls;
 
     // schema as array of string names
     std::vector<std::string> m_columnNames;

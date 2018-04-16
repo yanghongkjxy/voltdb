@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -18,6 +18,7 @@
 package org.voltdb.jni;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
@@ -30,13 +31,20 @@ import org.voltdb.PrivateVoltTableFactory;
 import org.voltdb.StatsSelector;
 import org.voltdb.TableStreamType;
 import org.voltdb.TheHashinator.HashinatorConfig;
+import org.voltdb.UserDefinedFunctionManager.UserDefinedFunctionRunner;
 import org.voltdb.VoltDB;
 import org.voltdb.VoltTable;
+import org.voltdb.VoltType;
+import org.voltdb.common.Constants;
 import org.voltdb.exceptions.EEException;
 import org.voltdb.exceptions.SerializableException;
 import org.voltdb.iv2.DeterminismHash;
+import org.voltdb.largequery.BlockId;
+import org.voltdb.largequery.LargeBlockManager;
 import org.voltdb.messaging.FastDeserializer;
 import org.voltdb.sysprocs.saverestore.SnapshotUtil;
+import org.voltdb.types.GeographyValue;
+import org.voltdb.utils.SerializationHelper;
 
 import com.google_voltpatches.common.base.Throwables;
 
@@ -86,14 +94,22 @@ public class ExecutionEngineJNI extends ExecutionEngine {
 
     /** Create a ByteBuffer (in a container) for serializing arguments to C++. Use a direct
     ByteBuffer as it will be passed directly to the C++ code. */
-    private static final int MAX_PSETBUFFER_SIZE = 50 * 1024 * 1024; // 50MB
+    // This matches MAX_UDF_BUFFER_SIZE in VoltDBEngine.h
+    // It does not limit the maximum size of the UDF buffer / parameter set buffer we can allocate,
+    // this is the maximum size of the buffer that we can persist without shrinking it at appropriate time.
+    private static final int MAX_BUFFER_SIZE = 50 * 1024 * 1024; // 50MB
     private BBContainer m_psetBufferC = null;
     private ByteBuffer m_psetBuffer = null;
 
     /** Create a ByteBuffer (in a container) for the C++ side to share time measurements and
         the success / fail status for fragments in a batch. */
-    private BBContainer perFragmentStatsBufferC = null;
-    private ByteBuffer perFragmentStatsBuffer = null;
+    private BBContainer m_perFragmentStatsBufferC = null;
+    private ByteBuffer m_perFragmentStatsBuffer = null;
+
+    // This a shared buffer for UDFs. The top end and the EE use this buffer to exchange the
+    // function parameters and the return value.
+    private BBContainer m_udfBufferC = null;
+    private ByteBuffer m_udfBuffer = null;
 
     /**
      * A deserializer backed by a direct byte buffer, for fast access from C++.
@@ -131,13 +147,14 @@ public class ExecutionEngineJNI extends ExecutionEngine {
             final int clusterIndex,
             final long siteId,
             final int partitionId,
+            final int sitesPerHost,
             final int hostId,
             final String hostname,
             final int drClusterId,
             final int defaultDrBufferSize,
             final int tempTableMemory,
             final HashinatorConfig hashinatorConfig,
-            final boolean createDrReplicatedStream)
+            final boolean isLowestSiteId)
     {
         // base class loads the volt shared library.
         super(siteId, partitionId);
@@ -152,6 +169,7 @@ public class ExecutionEngineJNI extends ExecutionEngine {
          */
         pointer = nativeCreate(System.getProperty("java.vm.vendor")
                                .toLowerCase().contains("sun microsystems"));
+
         nativeSetLogLevels(pointer, EELoggers.getLogLevels());
         int errorCode =
             nativeInitialize(
@@ -159,17 +177,19 @@ public class ExecutionEngineJNI extends ExecutionEngine {
                     clusterIndex,
                     siteId,
                     partitionId,
+                    sitesPerHost,
                     hostId,
                     getStringBytes(hostname),
                     drClusterId,
                     defaultDrBufferSize,
                     tempTableMemory * 1024 * 1024,
-                    createDrReplicatedStream,
+                    isLowestSiteId,
                     EE_COMPACTION_THRESHOLD);
         checkErrorCode(errorCode);
 
         setupPsetBuffer(smallBufferSize);
         setupPerFragmentStatsBuffer(smallBufferSize);
+        setupUDFBuffer(smallBufferSize);
         updateEEBufferPointers();
 
         updateHashinator(hashinatorConfig);
@@ -178,11 +198,12 @@ public class ExecutionEngineJNI extends ExecutionEngine {
 
     final void updateEEBufferPointers() {
         int errorCode = nativeSetBuffers(pointer,
-                m_psetBuffer, m_psetBuffer.capacity(),
-                perFragmentStatsBuffer, perFragmentStatsBuffer.capacity(),
+                m_psetBuffer,                 m_psetBuffer.capacity(),
+                m_perFragmentStatsBuffer,     m_perFragmentStatsBuffer.capacity(),
+                m_udfBuffer,                  m_udfBuffer.capacity(),
                 m_firstDeserializer.buffer(), m_firstDeserializer.buffer().capacity(),
-                m_nextDeserializer.buffer(), m_nextDeserializer.buffer().capacity(),
-                m_exceptionBuffer, m_exceptionBuffer.capacity());
+                m_nextDeserializer.buffer(),  m_nextDeserializer.buffer().capacity(),
+                m_exceptionBuffer,            m_exceptionBuffer.capacity());
         checkErrorCode(errorCode);
     }
 
@@ -197,13 +218,34 @@ public class ExecutionEngineJNI extends ExecutionEngine {
     }
 
     final void setupPerFragmentStatsBuffer(int size) {
-        if (perFragmentStatsBuffer != null) {
-            perFragmentStatsBufferC.discard();
-            perFragmentStatsBuffer = null;
+        if (m_perFragmentStatsBuffer != null) {
+            m_perFragmentStatsBufferC.discard();
+            m_perFragmentStatsBuffer = null;
         }
 
-        perFragmentStatsBufferC = DBBPool.allocateDirect(size);
-        perFragmentStatsBuffer = perFragmentStatsBufferC.b();
+        m_perFragmentStatsBufferC = DBBPool.allocateDirect(size);
+        m_perFragmentStatsBuffer = m_perFragmentStatsBufferC.b();
+    }
+
+    final void setupUDFBuffer(int size) {
+        if (m_udfBuffer != null) {
+            m_udfBufferC.discard();
+            m_udfBuffer = null;
+        }
+
+        try {
+            m_udfBufferC = DBBPool.allocateDirect(size);
+            m_udfBuffer = m_udfBufferC.b();
+        }
+        catch (OutOfMemoryError e) {
+            // If the allocation failed, we will just fail the current SQL statement,
+            // the server will not crash and can continue to execute the following requests.
+            // In this case, we cannot leave the buffer as NULL, reset it to the default size.
+            setupUDFBuffer(smallBufferSize);
+            updateEEBufferPointers();
+            // But the exception still needs to be thrown out so that the current SQL statement can fail.
+            throw e;
+        }
     }
 
     final void clearPsetAndEnsureCapacity(int size) {
@@ -212,10 +254,10 @@ public class ExecutionEngineJNI extends ExecutionEngine {
             setupPsetBuffer(size);
             updateEEBufferPointers();
         }
-        else if (m_psetBuffer.capacity() > MAX_PSETBUFFER_SIZE && size < MAX_PSETBUFFER_SIZE) {
+        else if (m_psetBuffer.capacity() > MAX_BUFFER_SIZE && size < MAX_BUFFER_SIZE) {
             // The last request was a batch that was greater than max network buffer size,
             // so let's not hang on to all that memory
-            setupPsetBuffer(MAX_PSETBUFFER_SIZE);
+            setupPsetBuffer(MAX_BUFFER_SIZE);
             updateEEBufferPointers();
         }
         else {
@@ -224,18 +266,18 @@ public class ExecutionEngineJNI extends ExecutionEngine {
     }
 
     final void clearPerFragmentStatsAndEnsureCapacity(int batchSize) {
-        assert(perFragmentStatsBuffer != null);
+        assert(m_perFragmentStatsBuffer != null);
         // Determine the required size of the per-fragment stats buffer:
         // int8_t perFragmentTimingEnabled
         // int32_t succeededFragmentsCount
         // succeededFragmentsCount * sizeof(int64_t) for duration time numbers.
         int size = 1 + 4 + batchSize * 8;
-        if (size > perFragmentStatsBuffer.capacity()) {
+        if (size > m_perFragmentStatsBuffer.capacity()) {
             setupPerFragmentStatsBuffer(size);
             updateEEBufferPointers();
         }
         else {
-            perFragmentStatsBuffer.clear();
+            m_perFragmentStatsBuffer.clear();
         }
     }
 
@@ -278,8 +320,10 @@ public class ExecutionEngineJNI extends ExecutionEngine {
         m_emptyDeserializerBuffer.discard();
         m_psetBufferC.discard();
         m_psetBuffer = null;
-        perFragmentStatsBufferC.discard();
-        perFragmentStatsBuffer = null;
+        m_perFragmentStatsBufferC.discard();
+        m_perFragmentStatsBuffer = null;
+        m_udfBufferC.discard();
+        m_udfBuffer = null;
         LOG.trace("Released Execution Engine.");
     }
 
@@ -312,25 +356,25 @@ public class ExecutionEngineJNI extends ExecutionEngine {
     // The timing is off by default.
     @Override
     public void setPerFragmentTimingEnabled(boolean enabled) {
-        perFragmentStatsBuffer.clear();
-        perFragmentStatsBuffer.put((byte)(enabled ? 1 : 0));
+        m_perFragmentStatsBuffer.clear();
+        m_perFragmentStatsBuffer.put((byte)(enabled ? 1 : 0));
     }
 
     // Extract the per-fragment stats from the buffer.
     @Override
     public int extractPerFragmentStats(int batchSize, long[] executionTimesOut) {
-        perFragmentStatsBuffer.clear();
+        m_perFragmentStatsBuffer.clear();
         // Discard the first byte since it is the timing on/off switch.
-        perFragmentStatsBuffer.get();
-        int succeededFragmentsCount = perFragmentStatsBuffer.getInt();
+        m_perFragmentStatsBuffer.get();
+        int succeededFragmentsCount = m_perFragmentStatsBuffer.getInt();
         if (executionTimesOut != null) {
             assert(executionTimesOut.length >= succeededFragmentsCount);
             for (int i = 0; i < succeededFragmentsCount; i++) {
-                executionTimesOut[i] = perFragmentStatsBuffer.getLong();
+                executionTimesOut[i] = m_perFragmentStatsBuffer.getLong();
             }
             // This is the time for the failed fragment.
             if (succeededFragmentsCount < executionTimesOut.length) {
-                executionTimesOut[succeededFragmentsCount] = perFragmentStatsBuffer.getLong();
+                executionTimesOut[succeededFragmentsCount] = m_perFragmentStatsBuffer.getLong();
             }
         }
         return succeededFragmentsCount;
@@ -341,7 +385,7 @@ public class ExecutionEngineJNI extends ExecutionEngine {
      * @param traceOn
      */
     @Override
-    protected FastDeserializer coreExecutePlanFragments(
+    public FastDeserializer coreExecutePlanFragments(
             final int batchIndex,
             final int numFragmentIds,
             final long[] planFragmentIds,
@@ -392,7 +436,7 @@ public class ExecutionEngineJNI extends ExecutionEngine {
                 try {
                     pset.flattenToBuffer(m_psetBuffer);
                 }
-                catch (final IOException exception) {
+                catch (final Exception exception) { //Not Just IO but bad params can throw RuntimeExceptions
                     throw new RuntimeException("Error serializing parameters for SQL batch element: " +
                                                i + " with plan fragment ID: " + planFragmentIds[i] +
                                                " and with params: " +
@@ -450,7 +494,7 @@ public class ExecutionEngineJNI extends ExecutionEngine {
         if (HOST_TRACE_ENABLED) {
             LOG.trace("Retrieving VoltTable:" + tableId);
         }
-        //Clear is destructive, do it before the native call
+        // Clear is destructive, do it before the native call
         m_nextDeserializer.clear();
         final int errorCode = nativeSerializeTable(pointer, tableId, m_nextDeserializer.buffer(),
                 m_nextDeserializer.buffer().capacity());
@@ -625,15 +669,15 @@ public class ExecutionEngineJNI extends ExecutionEngine {
      */
     @Override
     public void exportAction(boolean syncAction,
-            long ackTxnId, long seqNo, int partitionId, String tableSignature)
+            long uso, long seqNo, int partitionId, String tableSignature)
     {
         //Clear is destructive, do it before the native call
         m_nextDeserializer.clear();
         long retval = nativeExportAction(pointer,
-                                         syncAction, ackTxnId, seqNo, getStringBytes(tableSignature));
+                                         syncAction, uso, seqNo, getStringBytes(tableSignature));
         if (retval < 0) {
-            LOG.info("exportAction failed.  syncAction: " + syncAction + ", ackTxnId: " +
-                    ackTxnId + ", seqNo: " + seqNo + ", partitionId: " + partitionId +
+            LOG.info("exportAction failed.  syncAction: " + syncAction + ", uso: " +
+                    uso + ", seqNo: " + seqNo + ", partitionId: " + partitionId +
                     ", tableSignature: " + tableSignature);
         }
     }
@@ -658,7 +702,7 @@ public class ExecutionEngineJNI extends ExecutionEngine {
             Object value,
             HashinatorConfig config)
     {
-        ParameterSet parameterSet = ParameterSet.fromArrayNoCopy(value, config.type.typeId(), config.configBytes);
+        ParameterSet parameterSet = ParameterSet.fromArrayNoCopy(value, config.configBytes);
 
         // serialize the param set
         clearPsetAndEnsureCapacity(parameterSet.getSerializedSize());
@@ -686,14 +730,14 @@ public class ExecutionEngineJNI extends ExecutionEngine {
             }
         }
 
-        nativeUpdateHashinator(pointer, config.type.typeId(), config.configPtr, config.numTokens);
+        nativeUpdateHashinator(pointer, config.configPtr, config.numTokens);
     }
 
     @Override
     public long applyBinaryLog(ByteBuffer log, long txnId, long spHandle, long lastCommittedSpHandle, long uniqueId,
-                               int remoteClusterId, long undoToken) throws EEException
+                               int remoteClusterId, int remotePartitionId, long undoToken) throws EEException
     {
-        long rowCount = nativeApplyBinaryLog(pointer, txnId, spHandle, lastCommittedSpHandle, uniqueId, remoteClusterId, undoToken);
+        long rowCount = nativeApplyBinaryLog(pointer, txnId, spHandle, lastCommittedSpHandle, uniqueId, remoteClusterId,remotePartitionId, undoToken);
         if (rowCount < 0) {
             throwExceptionForError((int)rowCount);
         }
@@ -713,6 +757,154 @@ public class ExecutionEngineJNI extends ExecutionEngine {
         assert(buffer != null);
         assert(m_fallbackBuffer == null);
         m_fallbackBuffer = buffer;
+    }
+
+    public void resizeUDFBuffer(int size) {
+        // Read the size which we want to change to.
+        setupUDFBuffer(size);
+        updateEEBufferPointers();
+    }
+
+    public int callJavaUserDefinedFunction() {
+        m_udfBuffer.clear();
+        m_udfBuffer.getInt(); // skip the buffer size integer, it is only used by VoltDB IPC.
+        int functionId = m_udfBuffer.getInt();
+        UserDefinedFunctionRunner udfRunner = m_functionManager.getFunctionRunnerById(functionId);
+        assert(udfRunner != null);
+        Throwable throwable = null;
+        Object returnValue = null;
+        try {
+            // Call the user-defined function.
+            returnValue = udfRunner.call(m_udfBuffer);
+
+            VoltType returnType = udfRunner.getReturnType();
+            // If the function we are running returns variable-length return value,
+            // it may be possible that the buffer is not large enough to hold it.
+            // Check the required buffer size and enlarge the existing buffer when necessary.
+            // The default buffer size is 256K, which is more than enough for any
+            // fixed-length data and NULL variable-length data (the buffer size will not go less than 256K).
+            if (returnType.isVariableLength() && ! VoltType.isVoltNullValue(returnValue)) {
+                // The minimum required size is 5 bytes:
+                // 1 byte for the type indicator, 4 bytes for the prefixed length.
+                int sizeRequired = 1 + 4;
+                switch(returnType) {
+                case VARBINARY:
+                    if (returnValue instanceof byte[]) {
+                        sizeRequired += ((byte[])returnValue).length;
+                    }
+                    else if (returnValue instanceof Byte[]) {
+                        sizeRequired += ((Byte[])returnValue).length;
+                    }
+                    break;
+                case STRING:
+                    sizeRequired += ((String)returnValue).getBytes(Constants.UTF8ENCODING).length;
+                    break;
+                case GEOGRAPHY:
+                    sizeRequired += ((GeographyValue)returnValue).getLengthInBytes();
+                    break;
+                default:
+                }
+                if (sizeRequired > m_udfBuffer.capacity()) {
+                    resizeUDFBuffer(sizeRequired);
+                }
+            }
+            // Write the result to the shared buffer.
+            m_udfBuffer.clear();
+            UserDefinedFunctionRunner.writeValueToBuffer(m_udfBuffer, returnType, returnValue);
+            // Return zero status code for a successful execution.
+            return 0;
+        }
+        catch (InvocationTargetException ex1) {
+            // Exceptions thrown during Java reflection will be wrapped into this InvocationTargetException.
+            // We need to get its cause and throw that to the user.
+            throwable = ex1.getCause();
+        }
+        catch (Throwable ex2) {
+            throwable = ex2;
+        }
+        // Getting here means the execution was not successful.
+        try {
+            assert(throwable != null);
+            byte[] errorMsg = throwable.toString().getBytes(Constants.UTF8ENCODING);
+            // It is very unlikely that the size of a user's error message will exceed the UDF buffer size.
+            // But you never know.
+            if (errorMsg.length + 4 > m_udfBuffer.capacity()) {
+                resizeUDFBuffer(errorMsg.length + 4);
+            }
+            m_udfBuffer.clear();
+            SerializationHelper.writeVarbinary(errorMsg, m_udfBuffer);
+        }
+        catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return -1;
+    }
+
+    /**
+     * Store a large temp table block to disk.
+     *
+     * @param id           The id of the block to store to disk
+     * @param origAddress  The original address of the block
+     * @param block        A directly-allocated ByteBuffer of the block
+     * @return true if operation succeeded, false otherwise
+     */
+    public boolean storeLargeTempTableBlock(long siteId, long blockCounter, long origAddress, ByteBuffer block) {
+        LargeBlockManager lbm = LargeBlockManager.getInstance();
+        assert (lbm != null);
+
+        try {
+            lbm.storeBlock(new BlockId(siteId, blockCounter), origAddress, block);
+        }
+        catch (IOException ioe) {
+            LOG.error("Could not write large temp table block to disk: " + ioe.getMessage());
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Read a large table block from disk and write it to a ByteBuffer.
+     * Block will still be stored on disk when this operation completes.
+     *
+     * @param id     The id of the block to load
+     * @param block  The buffer to write the block to
+     * @return The original address of the block (so that its internal pointers may get updated)
+     */
+    public long loadLargeTempTableBlock(long siteId, long blockCounter, ByteBuffer block) {
+        LargeBlockManager lbm = LargeBlockManager.getInstance();
+        assert (lbm != null);
+        long origAddress = 0;
+
+        try {
+            origAddress = lbm.loadBlock(new BlockId(siteId, blockCounter), block);
+        }
+        catch (IOException ioe) {
+            LOG.error("Could not write large temp table block to disk: " + ioe.getMessage());
+        }
+
+        return origAddress;
+    }
+
+    /**
+     * Delete the block with the given id from disk.
+     *
+     * @param blockId   The id of the block to release
+     * @return True if the operation succeeded, and false otherwise
+     */
+    public boolean releaseLargeTempTableBlock(long siteId, long blockId) {
+        LargeBlockManager lbm = LargeBlockManager.getInstance();
+        assert (lbm != null);
+
+        try {
+            lbm.releaseBlock(new BlockId(siteId, blockId));
+        }
+        catch (IOException ioe) {
+            LOG.error("Could not release large temp table block on disk: " + ioe.getMessage());
+            return false;
+        }
+
+        return true;
     }
 
     @Override

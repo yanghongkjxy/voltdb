@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -41,7 +41,6 @@ import org.voltdb.client.Client;
 import org.voltdb.client.ClientResponse;
 import org.voltdb.client.ProcCallException;
 import org.voltdb.compiler.VoltProjectBuilder;
-import org.voltdb.utils.MiscUtils;
 
 public class TestShutdownSaveNoCommandLog extends RegressionSuite
 {
@@ -50,7 +49,6 @@ public class TestShutdownSaveNoCommandLog extends RegressionSuite
     }
 
     public void testShutdownSave() throws Exception {
-        if (!MiscUtils.isPro()) return;
         if (isValgrind()) return; // snapshot doesn't run in valgrind ENG-4034
 
         Client client2 = this.getClient();
@@ -184,7 +182,7 @@ public class TestShutdownSaveNoCommandLog extends RegressionSuite
 
         VoltProjectBuilder project = new VoltProjectBuilder();
         project.addSchema(ArbitraryDurationProc.class.getResource("clientfeatures.sql"));
-        project.addProcedures(ArbitraryDurationProc.class);
+        project.addProcedure(ArbitraryDurationProc.class);
         project.setUseDDLSchema(true);
         project.addPartitionInfo("indexme", "pkey");
 

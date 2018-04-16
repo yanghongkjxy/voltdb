@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -54,6 +54,28 @@ public class TestAdhocCompilerErrorMessages extends AdhocDDLTestBase
                 String message = pce.getLocalizedMessage();
                 Matcher m = pat.matcher(message);
                 assertTrue(String.format("'%s' mismatch: %s", pat.pattern(), message), m.matches());
+                threw = true;
+            }
+            assertTrue("Expected exception", threw);
+        }
+        finally {
+            teardownSystem();
+        }
+    }
+
+    @Test
+    public void testEmptyMultiStmtProcErrors() throws Exception
+    {
+        try {
+            VoltDB.Configuration config = new VoltDB.Configuration();
+            startSystem(config);
+            boolean threw = false;
+            try {
+                m_client.callProcedure("@AdHoc", "create procedure dummy as begin   end;");
+            }
+            catch (ProcCallException pce) {
+                String message = pce.getLocalizedMessage();
+                assertTrue(message.contains("Cannot create a stored procedure with no statements for procedure: dummy"));
                 threw = true;
             }
             assertTrue("Expected exception", threw);

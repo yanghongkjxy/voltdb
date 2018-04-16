@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -34,7 +34,6 @@ import org.voltdb.VoltTableRow;
 import org.voltdb.client.Client;
 import org.voltdb.client.ClientResponse;
 import org.voltdb.client.NoConnectionsException;
-import org.voltdb.client.NullCallback;
 import org.voltdb.client.ProcCallException;
 import org.voltdb.compiler.VoltProjectBuilder;
 import org.voltdb_testprocs.regressionsuites.indexes.CheckMultiMultiIntGTEFailure;
@@ -50,7 +49,7 @@ import org.voltdb_testprocs.regressionsuites.indexes.Insert;
 public class TestIndexesSuite extends RegressionSuite {
 
     /** Procedures used by this suite */
-    static final Class<?>[] PROCEDURES = { Insert.class,
+    static final Class<?>[] MP_PROCEDURES = { Insert.class,
         CheckMultiMultiIntGTEFailure.class, CompiledInLists.class};
 
     private void truncateTables(String[] tables) throws IOException, ProcCallException {
@@ -271,7 +270,7 @@ public class TestIndexesSuite extends RegressionSuite {
         VoltTable result = client.callProcedure("@AdHoc", "select * from P3 where NUM < 5 order by num desc")
                                  .getResults()[0];
         assertEquals(5, result.getRowCount());
-        TreeSet<Integer> ids = new TreeSet<Integer>();
+        TreeSet<Integer> ids = new TreeSet<>();
         while (result.advanceRow()) {
             assertFalse(ids.contains((int) result.getLong("ID")));
             ids.add((int) result.getLong("ID"));
@@ -406,11 +405,11 @@ public class TestIndexesSuite extends RegressionSuite {
         final VoltTableRow rowLTE0 = results[tableI].fetchRow(rowI++);
         final VoltTableRow rowLTE1 = results[tableI].fetchRow(rowI++);
         final VoltTableRow rowLTE2 = results[tableI].fetchRow(rowI++);
-        HashSet<Long> TID = new HashSet<Long>();
+        HashSet<Long> TID = new HashSet<>();
 
-        HashSet<Long> BID = new HashSet<Long>();
-        HashSet<Long> expectedTID = new HashSet<Long>();
-        HashSet<Long> expectedBID = new HashSet<Long>();
+        HashSet<Long> BID = new HashSet<>();
+        HashSet<Long> expectedTID = new HashSet<>();
+        HashSet<Long> expectedBID = new HashSet<>();
 
         expectedTID.add(-1L);
         expectedTID.add(0L);
@@ -832,7 +831,7 @@ public class TestIndexesSuite extends RegressionSuite {
 
     }
 
-    public void testRegressEdgeCases() throws IOException, ProcCallException, InterruptedException {
+    public void testRegressEdgeCases() throws Exception {
         subTestParameterizedLimitOnIndexScan();
         subTestPushDownAggregateWithLimit();
 
@@ -934,23 +933,15 @@ public class TestIndexesSuite extends RegressionSuite {
         }
     }
 
-
-
     void callHelper(Client client, String procname, Object ...objects )
-    throws InterruptedException, IOException
+    throws Exception
     {
-        NullCallback nullCallback = new NullCallback();
-        boolean done;
-        do {
-            done = client.callProcedure(nullCallback, procname, objects);
-            if (!done) {
-                client.backpressureBarrier();
-            }
-        } while(!done);
+        ClientResponse cr = client.callProcedure(procname, objects);
+        assertEquals(ClientResponse.SUCCESS, cr.getStatus());
     }
 
     // Testing ENG-506 but this probably isn't enough to trust...
-    private void subTestUpdateRange() throws IOException, ProcCallException, InterruptedException {
+    private void subTestUpdateRange() throws Exception {
         final Client client = getClient();
         VoltTable[] results;
 
@@ -1294,7 +1285,7 @@ public class TestIndexesSuite extends RegressionSuite {
 
         VoltProjectBuilder project = new VoltProjectBuilder();
         project.addSchema(Insert.class.getResource("indexes-ddl.sql"));
-        project.addProcedures(PROCEDURES);
+        project.addMultiPartitionProcedures(MP_PROCEDURES);
         project.addStmtProcedure("Eng397LimitIndexR1", "select * from R1 where R1.ID > 2 Limit ?");
         project.addStmtProcedure("Eng397LimitIndexP1", "select * from P1 where P1.ID > 2 Limit ?");
         project.addStmtProcedure("Eng397LimitIndexR2", "select * from R2 where R2.ID > 2 Limit ?");

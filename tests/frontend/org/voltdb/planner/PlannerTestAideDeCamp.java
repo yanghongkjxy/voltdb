@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -29,6 +29,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.hsqldb_voltpatches.HSQLInterface;
+import org.hsqldb_voltpatches.HSQLInterface.HSQLParseException;
+import org.hsqldb_voltpatches.VoltXMLElement;
 import org.json_voltpatches.JSONException;
 import org.json_voltpatches.JSONObject;
 import org.voltdb.catalog.Catalog;
@@ -38,7 +40,6 @@ import org.voltdb.catalog.Statement;
 import org.voltdb.catalog.StmtParameter;
 import org.voltdb.compiler.DatabaseEstimates;
 import org.voltdb.compiler.DeterminismMode;
-import org.voltdb.compiler.StatementCompiler;
 import org.voltdb.compiler.VoltCompiler;
 import org.voltdb.compiler.VoltCompiler.DdlProceduresToLoad;
 import org.voltdb.expressions.ParameterValueExpression;
@@ -69,7 +70,7 @@ public class PlannerTestAideDeCamp {
         assert(ddlurl != null);
         String schemaPath = URLDecoder.decode(ddlurl.getPath(), "UTF-8");
         VoltCompiler compiler = new VoltCompiler(false);
-        hsql = HSQLInterface.loadHsqldb();
+        hsql = HSQLInterface.loadHsqldb(ParameterizationInfo.getParamStateManager());
         VoltCompiler.DdlProceduresToLoad no_procs = DdlProceduresToLoad.NO_DDL_PROCEDURES;
         compiler.loadSchema(hsql, no_procs, schemaPath);
         db = compiler.getCatalogDatabase();
@@ -83,6 +84,9 @@ public class PlannerTestAideDeCamp {
         return db;
     }
 
+    public VoltXMLElement compileToXML(String sql) throws HSQLParseException {
+        return hsql.getXMLCompiledStatement(sql);
+    }
     /**
      * Compile a statement and return the head of the plan.
      * @param sql
@@ -143,14 +147,18 @@ public class PlannerTestAideDeCamp {
             partitioning = StatementPartitioning.forceMP();
         }
         String procName = catalogStmt.getParent().getTypeName();
-        QueryPlanner planner = new QueryPlanner(sql, stmtLabel, procName, db,
-                partitioning, hsql, estimates, false, StatementCompiler.DEFAULT_MAX_JOIN_TABLES,
-                costModel, null, joinOrder, detMode);
 
         CompiledPlan plan = null;
-        planner.parse();
-        plan = planner.plan();
-        assert(plan != null);
+        // This try-with-resources block acquires a global lock on all planning
+        // This is required until we figure out how to do parallel planning.
+        try (QueryPlanner planner = new QueryPlanner(sql, stmtLabel, procName, db,
+                partitioning, hsql, estimates, false,
+                costModel, null, joinOrder, detMode, false)) {
+
+            planner.parse();
+            plan = planner.plan();
+            assert(plan != null);
+        }
 
         // Partitioning optionally inferred from the planning process.
         if (partitioning.isInferred()) {
@@ -159,18 +167,18 @@ public class PlannerTestAideDeCamp {
 
         // Input Parameters
         // We will need to update the system catalogs with this new information
-        for (int i = 0; i < plan.parameters.length; ++i) {
+        for (int i = 0; i < plan.getParameters().length; ++i) {
             StmtParameter catalogParam = catalogStmt.getParameters().add(String.valueOf(i));
-            ParameterValueExpression pve = plan.parameters[i];
+            ParameterValueExpression pve = plan.getParameters()[i];
             catalogParam.setJavatype(pve.getValueType().getValue());
             catalogParam.setIsarray(pve.getParamIsVector());
             catalogParam.setIndex(i);
         }
 
         List<PlanNodeList> nodeLists = new ArrayList<>();
-        nodeLists.add(new PlanNodeList(plan.rootPlanGraph));
+        nodeLists.add(new PlanNodeList(plan.rootPlanGraph, false));
         if (plan.subPlanGraph != null) {
-            nodeLists.add(new PlanNodeList(plan.subPlanGraph));
+            nodeLists.add(new PlanNodeList(plan.subPlanGraph, false));
         }
 
         // Now update our catalog information

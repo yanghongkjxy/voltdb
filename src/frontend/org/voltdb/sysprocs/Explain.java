@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -67,10 +67,11 @@ public class Explain extends AdHocNTBase {
         // assume all DML/DQL at this point
         return runNonDDLAdHoc(VoltDB.instance().getCatalogContext(),
                               sqlStatements,
-                              true,
-                              null,
+                              true, // infer partitioning
+                              null, // no partition key
                               ExplainMode.EXPLAIN_ADHOC,
-                              false,
+                              false, // not a large query
+                              false, // not swap tables
                               userParams);
     }
 

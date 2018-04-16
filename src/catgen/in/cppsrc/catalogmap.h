@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -86,6 +86,10 @@ public:
      */
     field_map_iter end() const;
 
+    // Get the path of this catalog map.
+    // It is used by VoltDBEngine::processCatalogDeletes() for locating the deleted UDFs.
+    std::string path() const;
+
     /**
      * Clear the map. Does no destruction.
      */
@@ -163,6 +167,11 @@ typename std::map<std::string, T*>::const_iterator CatalogMap<T>::end() const {
 template <class T>
 void CatalogMap<T>::clear() {
     m_items.clear();
+}
+
+template <class T>
+std::string CatalogMap<T>::path() const {
+    return m_path;
 }
 
 } // namespace catalog

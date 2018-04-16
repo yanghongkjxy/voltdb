@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -27,6 +27,7 @@ import java.io.IOException;
 
 import junit.framework.Test;
 
+import org.junit.Ignore;
 import org.voltdb.BackendTarget;
 import org.voltdb.VoltTable;
 import org.voltdb.VoltTable.ColumnInfo;
@@ -42,9 +43,9 @@ public class TestLoadingSuite extends RegressionSuite {
     static byte upsertMode = (byte) 0;
 
     static VoltTable m_template = new VoltTable(new ColumnInfo[] {
-            new ColumnInfo("col1", VoltType.BIGINT),
-            new ColumnInfo("col2", VoltType.BIGINT),
-            new ColumnInfo("col3", VoltType.BIGINT),
+            new ColumnInfo("col1", VoltType.INTEGER),
+            new ColumnInfo("col2", VoltType.INTEGER),
+            new ColumnInfo("col3", VoltType.TINYINT),
             new ColumnInfo("col4", VoltType.STRING),
             new ColumnInfo("col5", VoltType.FLOAT)
     });
@@ -108,7 +109,11 @@ public class TestLoadingSuite extends RegressionSuite {
     }
 
     public void testMultiPartitionLoad() throws Exception {
-
+        // MockExecutionEngine did not implement loadTable
+        if (isHSQL()) {
+            System.out.println("Skip testMultiPartitionLoad for HSQL");
+            return;
+        }
         Client client = getClient();
         VoltTable table; ClientResponse r;
 
@@ -143,7 +148,9 @@ public class TestLoadingSuite extends RegressionSuite {
             try {
                 r = client.callProcedure("@LoadMultipartitionTable", "REPLICATED", upsertMode, table);
                 fail(); // prev stmt should throw exception
-            } catch (ProcCallException e) {}
+            } catch (ProcCallException e) {
+                e.printStackTrace();
+            }
             // 4 rows in the db from the previous test
             assertEquals(4, countReplicatedRows(client));
         }

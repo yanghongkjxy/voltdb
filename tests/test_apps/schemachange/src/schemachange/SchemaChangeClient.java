@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -541,7 +541,9 @@ public class SchemaChangeClient {
 
                 // create verify procedure
                 batch.add("CREATE PROCEDURE FROM CLASS %s", this.newSchema.verifyProc.getName());
-                if (this.newSchema.viewRep != null) {
+                // this view ddl can't be used if the table already contains data, only use it
+                // on empty tables
+                if (this.newSchema.viewRep != null && this.start == 0 ) {
                     batch.add(this.newSchema.viewRep.ddlForView());
                 }
 

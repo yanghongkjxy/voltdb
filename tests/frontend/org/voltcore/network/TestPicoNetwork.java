@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -32,11 +32,11 @@ import java.util.HashSet;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
-import junit.framework.TestCase;
-
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+
+import junit.framework.TestCase;
 
 public class TestPicoNetwork extends TestCase {
 
@@ -134,7 +134,7 @@ public class TestPicoNetwork extends TestCase {
         networkChannel = ssc.accept();
         rawChannel.finishConnect();
         rawChannel.configureBlocking(true);
-        pn = new PicoNetwork(networkChannel);
+        pn = new PicoNetwork(networkChannel, true);
         handler = new MockInputHandler();
         pn.start(handler, new HashSet<Long>());
     }

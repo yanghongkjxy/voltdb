@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -62,8 +62,8 @@ public abstract class VoltSystemProcedure extends VoltProcedure {
         new ColumnInfo("STATUS", VoltType.BIGINT);   // public to fix javadoc linking warning
 
     /** Standard success return value for sysprocs returning STATUS_SCHEMA */
-    protected static long STATUS_OK = 0L;
-    protected static long STATUS_FAILURE = 1L;
+    public static long STATUS_OK = 0L;
+    public static long STATUS_FAILURE = 1L;
 
     protected Cluster m_cluster;
     protected ClusterSettings m_clusterSettings;
@@ -202,6 +202,7 @@ public abstract class VoltSystemProcedure extends VoltProcedure {
 
         TransactionState txnState = m_runner.getTxnState();
 
+        int fragmentIndex = 0;
         for (SynthesizedPlanFragment pf : pfs) {
             assert (pf.parameters != null);
 
@@ -222,6 +223,10 @@ public abstract class VoltSystemProcedure extends VoltProcedure {
                     pf.parameters,
                     false,
                     txnState.isForReplay());
+
+            //During @MigratePartitionLeader, a fragment may be mis-routed. fragmentIndex is used to check which fragment is mis-routed and
+            //to determine how the follow-up fragments are processed.
+            task.setBatch(fragmentIndex++);
             if (pf.inputDepIds != null) {
                 for (int depId : pf.inputDepIds) {
                     task.addInputDepId(0, depId);

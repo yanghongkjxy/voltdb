@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -71,7 +71,7 @@ public class Encoder {
 
     /**
      *
-     * @param hexString An (even-length) hexidecimal string to be decoded.
+     * @param hexString An (even-length) hexadecimal string to be decoded.
      * @return The binary byte array value for the string (half length).
      */
     public static byte[] hexDecode(String hexString) {

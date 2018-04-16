@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -69,7 +69,7 @@ namespace voltdb {
         return bytes;
     }
 
-    void DummyTopend::pushExportBuffer(int64_t generation, int32_t partitionId, std::string signature, StreamBlock *block, bool sync, bool endOfStream) {
+    void DummyTopend::pushExportBuffer(int32_t partitionId, std::string signature, StreamBlock *block, bool sync) {
         if (sync) {
             return;
         }
@@ -80,12 +80,25 @@ namespace voltdb {
         receivedExportBuffer = true;
     }
 
+    void DummyTopend::pushEndOfStream(int32_t partitionId, std::string signature) {
+        partitionIds.push(partitionId);
+        signatures.push(signature);
+        receivedExportBuffer = true;
+    }
+
     int64_t DummyTopend::pushDRBuffer(int32_t partitionId, voltdb::StreamBlock *block) {
         receivedDRBuffer = true;
         partitionIds.push(partitionId);
         blocks.push_back(boost::shared_ptr<StreamBlock>(new StreamBlock(block)));
         data.push_back(boost::shared_array<char>(block->rawPtr()));
         return pushDRBufferRetval;
+    }
+
+
+    void DummyTopend::pushPoisonPill(int32_t partitionId, std::string& reason, StreamBlock *block) {
+        partitionIds.push(partitionId);
+        blocks.push_back(boost::shared_ptr<StreamBlock>(new StreamBlock(block)));
+        data.push_back(boost::shared_array<char>(block->rawPtr()));
     }
 
 
@@ -146,4 +159,25 @@ namespace voltdb {
         return "";
     }
 
-}
+    bool DummyTopend::storeLargeTempTableBlock(LargeTempTableBlock* block) {
+        return false;
+    }
+
+    bool DummyTopend::loadLargeTempTableBlock(LargeTempTableBlock* block) {
+        return false;
+    }
+
+    bool DummyTopend::releaseLargeTempTableBlock(LargeTempTableBlockId blockId) {
+        return false;
+    }
+
+    int32_t DummyTopend::callJavaUserDefinedFunction() {
+        // We do not call any UDF here, directly return zero which means success.
+        return 0;
+    }
+
+    void DummyTopend::resizeUDFBuffer(int32_t size) {
+        // We do nothing here.
+    }
+
+} // end namespace voltdb

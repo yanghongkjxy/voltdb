@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -33,16 +33,18 @@ import org.json_voltpatches.JSONStringer;
 public class PlanNodeList implements JSONString, Comparable<PlanNodeList> {
     private static final String EXECUTE_LIST_MEMBER_NAME = "EXECUTE_LIST";
     private static final String EXECUTE_LISTS_MEMBER_NAME = "EXECUTE_LISTS";
+    private static final String IS_LARGE_QUERY_MEMBER_NAME = "IS_LARGE_QUERY";
 
-    private PlanNodeTree m_tree;
+    protected PlanNodeTree m_tree;
     protected List<List<AbstractPlanNode>> m_executeLists = new ArrayList<>();
+    protected boolean m_isLargeQuery = false;
 
     public PlanNodeList() {
         super();
     }
 
-    public PlanNodeList(AbstractPlanNode root_node) {
-        m_tree = new PlanNodeTree(root_node);
+    public PlanNodeList(PlanNodeTree tree, boolean isLargeQuery) {
+        m_tree = tree;
         try {
             // Construct execute lists for all sub statement
             for (List<AbstractPlanNode> nodeList : m_tree.m_planNodesListMap.values()) {
@@ -52,6 +54,12 @@ public class PlanNodeList implements JSONString, Comparable<PlanNodeList> {
         } catch (Exception e) {
             e.printStackTrace();
         }
+
+        m_isLargeQuery = isLargeQuery;
+    }
+
+    public PlanNodeList(AbstractPlanNode root_node, boolean isLargeQuery) {
+        this(new PlanNodeTree(root_node), isLargeQuery);
     }
 
     public List<AbstractPlanNode> getExecutionList() {
@@ -88,7 +96,7 @@ public class PlanNodeList implements JSONString, Comparable<PlanNodeList> {
         // If any node has no children, put it in the execute list
         //
         List<AbstractPlanNode> execute_list = Collections.synchronizedList(new ArrayList<AbstractPlanNode>());
-        Map<AbstractPlanNode, Integer> child_cnts = new HashMap<AbstractPlanNode, Integer>();
+        Map<AbstractPlanNode, Integer> child_cnts = new HashMap<>();
         for (AbstractPlanNode node : planNodes) {
             int num_of_children = node.getChildCount();
             if (num_of_children == 0) {
@@ -101,7 +109,7 @@ public class PlanNodeList implements JSONString, Comparable<PlanNodeList> {
         // Now run through a simulation
         // Doing it this way maintains the nuances of the parent-child relationships
         //
-        List<AbstractPlanNode> list = new ArrayList<AbstractPlanNode>();
+        List<AbstractPlanNode> list = new ArrayList<>();
         while (!execute_list.isEmpty()) {
             AbstractPlanNode node = execute_list.remove(0);
             //
@@ -177,6 +185,8 @@ public class PlanNodeList implements JSONString, Comparable<PlanNodeList> {
                 }
                 stringer.endArray(); //end execution list
             }
+
+            stringer.keySymbolValuePair(IS_LARGE_QUERY_MEMBER_NAME, m_isLargeQuery);
 
             stringer.endObject(); //end PlanNodeList
             return stringer.toString();

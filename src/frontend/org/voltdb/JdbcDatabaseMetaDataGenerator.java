@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -20,6 +20,7 @@ package org.voltdb;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
+import org.hsqldb_voltpatches.HSQLInterface;
 import org.json_voltpatches.JSONException;
 import org.json_voltpatches.JSONObject;
 import org.voltcore.logging.VoltLogger;
@@ -569,10 +570,19 @@ public class JdbcDatabaseMetaDataGenerator
                 {
                     for (ColumnRef column : c.getIndex().getColumns())
                     {
+                        String columnName;
+
+                        // if the index name is "MATVIEW_PK_CONSTRAINT", the column name for the materialized view is obtained
+                        // from its column information - ENG-6927
+                        if (c.getTypeName().equals(HSQLInterface.AUTO_GEN_MATVIEW_CONST) ) {
+                            columnName = column.getColumn().getTypeName();
+                        } else {
+                            columnName = column.getTypeName();
+                        }
                         results.addRow(null,
                                        null, // table schema
                                        table.getTypeName(), // table name
-                                       column.getTypeName(), // column name
+                                       columnName, // column name
                                        column.getRelativeIndex(), // key_seq
                                        c.getTypeName() // PK_NAME
                                       );

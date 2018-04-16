@@ -1,5 +1,5 @@
 /* This file is part of VoltDB.
- * Copyright (C) 2008-2017 VoltDB Inc.
+ * Copyright (C) 2008-2018 VoltDB Inc.
  *
  * This file contains original code and/or modifications of original code.
  * Any modifications made by VoltDB Inc. are licensed under the following
@@ -57,24 +57,61 @@
 
 namespace voltdb {
 
+/**
+ * A special iterator class used only for testing.  This class allows
+ * utility functions getRandomTuple and the like to work.
+ */
+class JumpingTableIterator : public TableIterator {
+public:
+    JumpingTableIterator(PersistentTable* table);
+    int getTuplesInNextBlock();
+    bool hasNextBlock();
+    void nextBlock();
+
+private:
+    TBMapI m_end;        // Use here for easy access to end()
+};
+
+inline JumpingTableIterator::JumpingTableIterator(PersistentTable* parent)
+    : TableIterator((Table*)parent, parent->m_data.begin())
+    , m_end(parent->m_data.end())
+{
+}
+
+inline int JumpingTableIterator::getTuplesInNextBlock() {
+    assert(getBlockIterator() != m_end);
+    return getBlockIterator().data()->activeTuples();
+}
+
+inline bool JumpingTableIterator::hasNextBlock() {
+    return getBlockIterator() != m_end;
+}
+
+inline void JumpingTableIterator::nextBlock() {
+    assert(getBlockIterator() != m_end);
+    TBPtr currentBlock = getBlockIterator().data();
+    auto blockIt = getBlockIterator();
+    ++blockIt;
+    setBlockIterator(blockIt);
+    setFoundTuples(getFoundTuples() + currentBlock->activeTuples());
+}
+
 bool tableutil::getRandomTuple(const voltdb::PersistentTable* table, voltdb::TableTuple &out)
 {
     voltdb::PersistentTable* table2 = const_cast<voltdb::PersistentTable*>(table);
     int cnt = (int)table->visibleTupleCount();
     if (cnt > 0) {
         int idx = (rand() % cnt);
-        JumpingTableIterator* it = table2->makeJumpingIterator();
-        while (it->hasNextBlock() && it->getTuplesInNextBlock() <= idx) {
-            idx -= it->getTuplesInNextBlock();
-            it->nextBlock();
+        JumpingTableIterator it(table2);
+        while (it.hasNextBlock() && it.getTuplesInNextBlock() <= idx) {
+            idx -= it.getTuplesInNextBlock();
+            it.nextBlock();
         }
-        while (it->next(out)) {
+        while (it.next(out)) {
             if (idx-- == 0) {
-                delete it;
                 return true;
             }
         }
-        delete it;
         throwFatalException("Unable to retrieve a random tuple."
                 "Iterated entire table below active tuple count but ran out of tuples");
     }
@@ -87,20 +124,18 @@ bool tableutil::getLastTuple(const voltdb::PersistentTable* table, voltdb::Table
     int cnt = (int)table->visibleTupleCount();
     if (cnt > 0) {
         int idx = cnt-1;
-        JumpingTableIterator* it = table2->makeJumpingIterator();
-        while (it->hasNextBlock() && it->getTuplesInNextBlock() <= idx) {
-            idx -= it->getTuplesInNextBlock();
-            it->nextBlock();
+        JumpingTableIterator it(table2);
+        while (it.hasNextBlock() && it.getTuplesInNextBlock() <= idx) {
+            idx -= it.getTuplesInNextBlock();
+            it.nextBlock();
         }
-        while (it->next(out)) {
+        while (it.next(out)) {
             if (idx-- == 0) {
                 voltdb::TableTuple tmp;
-                assert(!it->next(tmp));
-                delete it;
+                assert(!it.next(tmp));
                 return true;
             }
         }
-        delete it;
         throwFatalException("Unable to retrieve a random tuple."
                 "Iterated entire table below active tuple count but ran out of tuples");
     }
@@ -113,7 +148,7 @@ void tableutil::setRandomTupleValues(Table* table, TableTuple *tuple)
     assert(tuple);
     for (int col_ctr = 0, col_cnt = table->columnCount(); col_ctr < col_cnt; col_ctr++) {
         const TupleSchema::ColumnInfo *columnInfo = table->schema()->getColumnInfo(col_ctr);
-        NValue value = getRandomValue(columnInfo->getVoltType(), columnInfo->length);
+        NValue value = ValueFactory::getRandomValue(columnInfo->getVoltType(), columnInfo->length);
 
         tuple->setNValue(col_ctr, value);
 
